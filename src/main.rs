@@ -107,7 +107,7 @@ impl Chunk {
     fn node_local_pos_to_edge_mask(nlp: UVec3) -> u8 {
         let mut edge_mask: u8 = 0;
 
-        // +1 for off by 1 by 0 index and +1 due to always rounding particle position down
+        // +1 for off by 1 because 0 index and +1 due to always rounding particle position down
         if y < Chunk::EDGE_BUFFER_SIZE { edge_mask | 1 } // 1
         else if y > Chunk::CHUNK_SIZE - (Chunk::EDGE_BUFFER_SIZE + 2) { edge_mask | 1 << 5 } // 6
         if z < Chunk::EDGE_BUFFER_SIZE { edge_mask | 1 << 1 } // 2
@@ -118,6 +118,13 @@ impl Chunk {
         edge_mask
     }
 
+    ///
+    /// Input:
+    /// The index of a node
+    ///
+    /// Output:
+    /// The local position of the node inside its chunk
+    ///
     fn index_to_node_local_pos(i: usize) -> UVec3 {
         let c2 = Chunk::CHUNK_SIZE * Chunk::CHUNK_SIZE;
         let z = i / c2;
@@ -127,10 +134,12 @@ impl Chunk {
         UVec3::new(x, y, z)
     }
 }
+
 impl Deref for Chunk {
     type Target = [Node; Chunk::CHUNK_SIZE * Chunk::CHUNK_SIZE * Chunk::CHUNK_SIZE];
     fn deref(&self) -> &Self::Target { &self.g } 
 }
+
 impl DerefMut for Chunk { fn deref_mut(&mut self) -> &mut Self::Target { &mut self.g }  }
 
 // Eulerian Grid Container 
@@ -167,30 +176,14 @@ impl Grid {
         // 6 (0, +1, 0)
         //
         let mut edge_mask = 0;
-        // 1
-        if let None = self.get(&(pos.0 , pos.1 - 1, pos.2)) {
-            edge_mask |= 1;
-        }
-        // 2
-        if let None = self.get(&(pos.0 , pos.1, pos.2 - 1)) {
-            edge_mask |= 1 << 1;
-        }
-        // 3 
-        if let None = self.get(&(pos.0 - 1, pos.1, pos.2)) {
-            edge_mask |= 1 << 2;
-        }
-        // 4
-        if let None = self.get(&(pos.0 + 1, pos.1, pos.2)) {
-            edge_mask |= 1 << 3;
-        }
-        // 5
-        if let None = self.get(&(pos.0, pos.1, pos.2 + 1)) {
-            edge_mask |= 1 << 4;
-        }
-        // 6
-        if let None = self.get(&(pos.0, pos.1 + 1, pos.2)) {
-            edge_mask |= 1 << 5;
-        }
+
+        if let None = self.get(&(pos.0 , pos.1 - 1, pos.2)) { edge_mask |= 1; } // 1
+        if let None = self.get(&(pos.0 , pos.1, pos.2 - 1)) { edge_mask |= 1 << 1; } // 2
+        if let None = self.get(&(pos.0 - 1, pos.1, pos.2)) { edge_mask |= 1 << 2; } // 3
+        if let None = self.get(&(pos.0 + 1, pos.1, pos.2)) { edge_mask |= 1 << 3; } // 4
+        if let None = self.get(&(pos.0, pos.1, pos.2 + 1)) { edge_mask |= 1 << 4; } // 5
+        if let None = self.get(&(pos.0, pos.1 + 1, pos.2)) { edge_mask |= 1 << 5; ) // 6
+        
         let chunk = Chunk{
             g: [Node::default(); Chunk::CHUNK_SIZE * Chunk::CHUNK_SIZE * Chunk::CHUNK_SIZE],
             edge_mask
