@@ -73,13 +73,13 @@ impl Chunk {
     /// Output:
     /// Chunk coords of chunk responsible for that Node
     //        
-    fn node_pos_to_chunk_pos(np: IVec3) -> IVec3 {
+    fn node_world_pos_to_chunk_pos(nwp: IVec3) -> IVec3 {
         let ichunk = Chunk::CHUNK_SIZE as i32; 
         // Adjusts for off by 1 for negatives because np 0,0,0 is in cp 0,0,0
         IVec3::new(
-            if np.x < 0 { (np.x + 1) / ichunk - 1 } else { np.x / ichunk },
-            if np.y < 0 { (np.y + 1) / ichunk - 1 } else { np.y / ichunk },
-            if np.z < 0 { (np.z + 1) / ichunk - 1 } else { np.z / ichunk }
+            if nwp.x < 0 { (nwp.x + 1) / ichunk - 1 } else { nwp.x / ichunk },
+            if nwp.y < 0 { (nwp.y + 1) / ichunk - 1 } else { nwp.y / ichunk },
+            if nwp.z < 0 { (nwp.z + 1) / ichunk - 1 } else { nwp.z / ichunk }
         )
     }
 
@@ -90,15 +90,35 @@ impl Chunk {
     /// Output:
     /// Index of node in its chunk
     ///
-    fn node_pos_to_index(np: IVec3) -> usize {
+    fn node_world_pos_to_index(nwp: IVec3) -> usize {
         let ichunk = Chunk::CHUNK_SIZE as i32;
-        let npl = np.rem_euclid(ichunk); // Node Position Local
+        let nlp = nwp.rem_euclid(ichunk); // Node World Position => Node Local Position 
         // TODO: See if Morton Encoding is more efficient
-        npl.z as usize * Chunk::CHUNK_SIZE * Chunk::CHUNK_SIZE + npl.y as usize * Chunk::CHUNK_SIZE + npl.x as usize
+        nlp.z as usize * Chunk::CHUNK_SIZE * Chunk::CHUNK_SIZE + nlp.y as usize * Chunk::CHUNK_SIZE + nlp.x as usize
     }
 
-    fn node_pos_edge_mask() {}
-    fn index_to_local_pos(i: usize) -> UVec3 {
+    ///
+    /// Input:
+    /// The local position of a Node
+    ///
+    /// Output:
+    /// The edge mask of the current edges of the chunk a node is on
+    ///
+    fn node_local_pos_to_edge_mask(nlp: UVec3) -> u8 {
+        let mut edge_mask: u8 = 0;
+
+        // +1 for off by 1 by 0 index and +1 due to always rounding particle position down
+        if y < Chunk::EDGE_BUFFER_SIZE { edge_mask | 1 } // 1
+        else if y > Chunk::CHUNK_SIZE - (Chunk::EDGE_BUFFER_SIZE + 2) { edge_mask | 1 << 5 } // 6
+        if z < Chunk::EDGE_BUFFER_SIZE { edge_mask | 1 << 1 } // 2
+        else if z > Chunk::CHUNK_SIZE - (Chunk::EDGE_BUFFER_SIZE + 2) { edge_mask | 1 << 4 } // 5
+        if x < Chunk::EDGE_BUFFER_SIZE { edge_mask | 1 << 2 } // 3
+        else if x > Chunk::CHUNK_SIZE - (Chunk::EDGE_BUFFER_SIZE + 2) { edge_mask | 1 << 3 } // 4
+
+        edge_mask
+    }
+
+    fn index_to_node_local_pos(i: usize) -> UVec3 {
         let c2 = Chunk::CHUNK_SIZE * Chunk::CHUNK_SIZE;
         let z = i / c2;
         let y = (i % c2) / Chunk::CHUNK_SIZE;
