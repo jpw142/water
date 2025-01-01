@@ -1,12 +1,13 @@
 #![allow(non_upper_case_globals)]
 
 use rayon::prelude::*;
+use crate::DrawState;
 use bevy::{prelude::*, gizmos::gizmos, color::palettes::{tailwind::{RED_500, BLUE_500}, css::GHOST_WHITE}};
 use std::collections::HashMap;
 
 use crate::grid::*;
 
-const dt: f32 = 0.1;
+const dt: f32 = 0.2;
 const gravity: f32 = -0.3;
 const rest_density: f32 = 4.0;
 const dynamic_viscosity: f32 = 0.1;
@@ -305,7 +306,7 @@ pub fn g2p (
         }
         p.c = b.mul_scalar(4.);
 
-        let end = (16 - (Chunk::EDGE_BUFFER_SIZE + 1)) as f32;
+        let end = (16 - (Chunk::EDGE_BUFFER_SIZE)) as f32;
 
         let local_pos = Chunk::index_to_node_local_pos(Chunk::node_world_pos_to_index(n.as_ivec3()));
 
@@ -316,7 +317,7 @@ pub fn g2p (
         if x_n.x < 2. {p.v.x += Chunk::EDGE_BUFFER_SIZE as f32 - x_n.x as f32} // 3
         if x_n.x > end {p.v.x += end - x_n.x as f32} //4 
         if x_n.z > end {p.v.z += end - x_n.z as f32} // 5
-        //if x_n.y > end {p.v.y += end - x_n.y as f32} // 6
+        if x_n.y > end {p.v.y += end - x_n.y as f32} // 6
 
         let v = p.v;
         p.x += v * dt; 
@@ -351,27 +352,37 @@ pub fn initialize(
     }
 }
 
-pub fn draw(
+pub fn spawn(
     mut commands: Commands,
+    ) {
+    commands.spawn(Particle {
+        x: Vec3::new(8., 12., 8.),
+        v: Vec3::ZERO,
+        c: Mat3::ZERO,
+        p: 0, m: 1.
+    });
+}
+
+pub fn draw(
     particles: Query<&Particle>,
     mut gizmos: Gizmos,
+    mut draw_state: ResMut<DrawState>,
 ) {
-   // commands.spawn(Particle {
-   //     x: Vec3::splat(8.),
-   //     v: Vec3::ZERO,
-   //     c: Mat3::ZERO,
-   //     p: 0, m: 1.
-   // });
     for i in 0..5 {
         for j in 0..5 {
             for k in 0..5 {
                 gizmos.sphere(Vec3::from((i as f32, j as f32, k as f32)) * 4., 0.05, GHOST_WHITE);
-    }}}
+            }}}
     gizmos.cuboid( 
         Transform::from_translation(Vec3::from((8., 8., 8.))).with_scale(Vec3::splat(16.)),
         GHOST_WHITE
         );
+
+    if draw_state.0 == false {
+        return;
+    }
+
     particles.iter().for_each(|p| {
-        gizmos.sphere(p.x, 0.1, RED_500);
+        gizmos.sphere(p.x, 0.1, BLUE_500);
     });
 }
