@@ -2,10 +2,11 @@
 
 use rayon::prelude::*;
 use bevy::{prelude::*, gizmos::gizmos, color::palettes::{tailwind::{RED_500, BLUE_500}, css::GHOST_WHITE}};
+use std::collections::HashMap;
 
 use crate::grid::*;
 
-const dt: f32 = 0.4;
+const dt: f32 = 0.1;
 const gravity: f32 = -0.3;
 const rest_density: f32 = 4.0;
 const dynamic_viscosity: f32 = 0.1;
@@ -71,6 +72,10 @@ pub fn p2g1 (
             0.5 * (0.5 + dx).powf(2.),
         ];
 
+
+        // Buffer to store new node informatio nin to avoid locking mutex 27 times
+        let mut node_buffer: HashMap<IVec3, Vec<(usize, f32, Vec3)>> = HashMap::new();
+
         // Calculate contributions of langrangian particle to euclidean grid
         for i in 0..3 { 
             for j in 0..3 {
@@ -91,17 +96,24 @@ pub fn p2g1 (
                     let v_contrib = mass_contrib * (p.v + Vec3::from(q));
 
                     // Get Mutex
-                    let chunk_index = Chunk::node_world_pos_to_chunk_pos(icurr_x); 
-                    let n_index = Chunk::node_world_pos_to_index(icurr_x);
-                    let mut chunk = grid.get(&chunk_index).expect("Particle somehow out of bounds of loaded chunks").lock().expect("Error locking mutex for p2g");
+                    let chunk_pos = Chunk::node_world_pos_to_chunk_pos(icurr_x); 
+                    let node_index = Chunk::node_world_pos_to_index(icurr_x);
 
-                    // Do work inside mutex
-                    chunk[n_index].m += mass_contrib;
-                    chunk[n_index].v += v_contrib;
-
-                    std::mem::drop(chunk); // Unlock Mutex
+                    // Append nodes to node buffer
+                    node_buffer.entry(chunk_pos).or_insert(vec![]).push((node_index, mass_contrib, v_contrib));
+                    
                 }
             }
+        }
+
+        // Lock the mutexes and write the Nod data
+        for (chunk, nodes) in node_buffer {
+            let mut chunk = grid.get(&chunk).expect("Particle out of bounds p2g1").lock().expect("Error locking mutex for p2g1");
+            for node in nodes {
+                chunk[node.0].m += node.1;
+                chunk[node.0].v += node.2;
+            }
+            std::mem::drop(chunk); // Unlock Mutex
         }
     });
 }
@@ -120,6 +132,7 @@ pub fn p2g2 (
             0.5 * (0.5 + dx).powf(2.),
         ];
 
+
         let mut density: f32 = 0.;
         // Calculate contributions of langrangian particle to euclidean grid
         for i in 0..3 { 
@@ -136,6 +149,7 @@ pub fn p2g2 (
                     // Get Mutex
                     let chunk_index = Chunk::node_world_pos_to_chunk_pos(icurr_x); 
                     let n_index = Chunk::node_world_pos_to_index(icurr_x);
+                    // TODO: Could be improved by pre-fetching masses
                     let mut chunk = grid.get(&chunk_index).expect("Particle somehow out of bounds of loaded chunks").lock().expect("Error locking mutex for p2g");
 
                     // Do work inside mutex
@@ -187,7 +201,6 @@ pub fn p2g2 (
 
 
                     // Do work inside mutex
-                    density += chunk[n_index].m * weight;
                     chunk[n_index].v += momentum;
 
                     std::mem::drop(chunk); // Unlock Mutex
@@ -292,16 +305,18 @@ pub fn g2p (
         }
         p.c = b.mul_scalar(4.);
 
-        let end = (16 - (Chunk::EDGE_BUFFER_SIZE + 2)) as f32;
+        let end = (16 - (Chunk::EDGE_BUFFER_SIZE + 1)) as f32;
 
         let local_pos = Chunk::index_to_node_local_pos(Chunk::node_world_pos_to_index(n.as_ivec3()));
 
-      // if p.x.y < 3. {p.v.y += Chunk::EDGE_BUFFER_SIZE as f32 - local_pos.y as f32} // 1
-      // if p.x.z < 3. {p.v.z += Chunk::EDGE_BUFFER_SIZE as f32 - local_pos.z as f32} // 2
-      // if p.x.x < 3. {p.v.x += Chunk::EDGE_BUFFER_SIZE as f32 - local_pos.x as f32} // 3
-      // if p.x.x > end {p.v.x += end - local_pos.x as f32} //4 
-      // if p.x.z > end {p.v.z += end - local_pos.z as f32} // 5
-      // if p.x.y > end {p.v.y += end - local_pos.y as f32} // 6
+        let x_n = p.x + p.v;
+
+        if x_n.y < 2. {p.v.y += Chunk::EDGE_BUFFER_SIZE as f32 - x_n.y as f32} // 1
+        if x_n.z < 2. {p.v.z += Chunk::EDGE_BUFFER_SIZE as f32 - x_n.z as f32} // 2
+        if x_n.x < 2. {p.v.x += Chunk::EDGE_BUFFER_SIZE as f32 - x_n.x as f32} // 3
+        if x_n.x > end {p.v.x += end - x_n.x as f32} //4 
+        if x_n.z > end {p.v.z += end - x_n.z as f32} // 5
+        //if x_n.y > end {p.v.y += end - x_n.y as f32} // 6
 
         let v = p.v;
         p.x += v * dt; 
@@ -337,9 +352,16 @@ pub fn initialize(
 }
 
 pub fn draw(
+    mut commands: Commands,
     particles: Query<&Particle>,
     mut gizmos: Gizmos,
 ) {
+   // commands.spawn(Particle {
+   //     x: Vec3::splat(8.),
+   //     v: Vec3::ZERO,
+   //     c: Mat3::ZERO,
+   //     p: 0, m: 1.
+   // });
     for i in 0..5 {
         for j in 0..5 {
             for k in 0..5 {
@@ -350,6 +372,6 @@ pub fn draw(
         GHOST_WHITE
         );
     particles.iter().for_each(|p| {
-        gizmos.sphere(p.x, 0.05, RED_500);
+        gizmos.sphere(p.x, 0.1, RED_500);
     });
 }
