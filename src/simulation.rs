@@ -1,8 +1,8 @@
 #![allow(non_upper_case_globals)]
 
 use rayon::prelude::*;
-use crate::DrawState;
-use bevy::{prelude::*, gizmos::gizmos, color::palettes::{tailwind::{RED_500, BLUE_500}, css::GHOST_WHITE}};
+use crate::{DrawState, SpawnState, SpawnBuffer, DespawnBuffer};
+use bevy::{prelude::*, gizmos::gizmos, color::palettes::{tailwind::{RED_500, BLUE_500, ORANGE_500, LIME_500, GRAY_500}, css::GHOST_WHITE}};
 use std::collections::HashMap;
 
 use crate::grid::*;
@@ -16,7 +16,7 @@ const eos_power: f32 = 4.;
 
 
 /// Langrangian Particle
-#[derive(Component)]
+#[derive(Component, Clone, Copy)]
 pub struct Particle {
     x: Vec3,    // Position
     v: Vec3,    // Velocity
@@ -35,13 +35,13 @@ pub struct Node {
 
 impl Default for Node {
     fn default() -> Self {
-        Node { v: Vec3::ZERO, m: 0., p: 0}
+        Node { v: Vec3::ZERO, m: 0., p: 1}
     }
 }
 
 impl Node {
     fn zero(&mut self) {
-        self.p = 0;
+        self.p = 1;
         self.m = 0.0;
         self.v = Vec3::ZERO;
     }
@@ -155,6 +155,9 @@ pub fn p2g2 (
 
                     // Do work inside mutex
                     density += chunk[n_index].m * weight;
+                    if i == 0 && j == 0 && k == 0 {
+                        chunk[n_index].p *= p.p as u32;
+                    }
 
                     std::mem::drop(chunk); // Unlock Mutex
                 }
@@ -229,9 +232,11 @@ pub fn p2g2 (
 // 5 (0, 0, +1)
 // 6 (0, +1, 0)
 //
-pub fn update_grid ( grid: Res<Grid>) {
-
-    grid.par_iter().for_each(|(_, c)| {
+pub fn update_grid ( 
+    grid: Res<Grid>,
+    spawn_buf: Res<SpawnBuffer>,
+) {
+    grid.par_iter().for_each(|(chunk_pos, c)| {
         let mut chunk = c.lock().expect("Error locking Mutex for update_grid");
         let chunk_edge_mask = chunk.edge_mask;
 
@@ -239,8 +244,22 @@ pub fn update_grid ( grid: Res<Grid>) {
             // Boundary condition
             let nlp = Chunk::index_to_node_local_pos(i);
 
-
+            if node.p % 6 == 0 {
+                let mut sb = spawn_buf.0.lock().unwrap();
+                sb.push(Particle{
+                    x: (nlp.as_ivec3() + (chunk_pos * Chunk::CHUNK_SIZE as i32)).as_vec3() + Vec3::splat(0.5),
+                    m: 2.,
+                    p: 5,
+                    c: Mat3::ZERO,
+                    v: Vec3::ZERO,
+                });
+                node.p = 6;
+            }
+            else {
+                node.p = 1;
+            }
             if node.m > 0. {
+                // implementing material combination
                 node.v /= node.m;
                 node.v.y += dt * gravity;
             }
@@ -255,9 +274,10 @@ pub fn update_grid ( grid: Res<Grid>) {
 
 pub fn g2p (
     grid: Res<Grid>,
-    mut particles: Query<&mut Particle>
+    mut particles: Query<(Entity, &mut Particle)>,
+    despawn_buf: Res<DespawnBuffer>,
 ) {
-   particles.par_iter_mut().for_each(|mut p| {
+   particles.par_iter_mut().for_each(|(e, mut p)| {
         p.v = Vec3::ZERO;
 
         let n = p.x.trunc(); // Truncates decimal part of float, leaving integer part
@@ -285,7 +305,7 @@ pub fn g2p (
                     // Get Mutex
                     let chunk_index = Chunk::node_world_pos_to_chunk_pos(icurr_x); 
                     let n_index = Chunk::node_world_pos_to_index(icurr_x);
-                    let chunk = grid.get(&chunk_index).expect("Particle somehow out of bounds of loaded chunks").lock().expect("Error locking mutex for p2g");
+                    let mut chunk = grid.get(&chunk_index).expect("Particle somehow out of bounds of loaded chunks").lock().expect("Error locking mutex for p2g");
 
                     // Do work inside mutex
                     let mut w_v = chunk[n_index].v;
@@ -293,6 +313,11 @@ pub fn g2p (
                     // Get the edge_mask for free while locking the first time
                     if i == 0 && j == 0 && k == 0 {
                         edge_mask = chunk.edge_mask;
+                        if chunk[n_index].p.max(1) % p.p as u32 == 0 {
+                            let mut dsb = despawn_buf.0.lock().unwrap();
+                            dsb.push(e);
+                            chunk[n_index].p /= p.p as u32;
+                        }
                     }
 
                     std::mem::drop(chunk); // Unlock Mutex
@@ -337,14 +362,14 @@ pub fn initialize(
         }
     }
 
-    for x in 3..13 {
-        for y in 3..13{
+    for x in 8..24 {
+        for y in 8..24{
             for z in 3..13 {
                 commands.spawn(Particle {
-                    x: Vec3::new(x as f32, y as f32, z as f32),
+                    x: Vec3::new(x as f32/2., y as f32/2., z as f32/2.),
                     v: Vec3::ZERO,
                     c: Mat3::ZERO,
-                    p: 0,
+                    p: 2,
                     m: 1.
                 });
             }
@@ -354,17 +379,40 @@ pub fn initialize(
 
 pub fn spawn(
     mut commands: Commands,
+    spawn_state: ResMut<SpawnState>,
+    spawn_buf: Res<SpawnBuffer>,
+    despawn_buf: Res<DespawnBuffer>,
     ) {
+    // Spawn any particles due to be spawned
+    let mut sb = spawn_buf.0.lock().unwrap();
+    for p in sb.drain(..) {
+        commands.spawn(p);
+    }
+    drop(sb);
+
+    // Despawn any particles due to be despawned
+    let mut dsb = despawn_buf.0.lock().unwrap();
+    for e in dsb.drain(..) {
+        commands.entity(e).despawn();
+    }
+    drop(dsb);
+
+    if spawn_state.0 == false {
+        return;
+    }
+    // Spawn particles as a spout at the top
     commands.spawn(Particle {
         x: Vec3::new(8., 12., 8.),
         v: Vec3::ZERO,
         c: Mat3::ZERO,
-        p: 0, m: 1.
+        p: 3, 
+        m: 1.
     });
 }
 
 pub fn draw(
     particles: Query<&Particle>,
+    grid: Res<Grid>,
     mut gizmos: Gizmos,
     mut draw_state: ResMut<DrawState>,
 ) {
@@ -383,6 +431,19 @@ pub fn draw(
     }
 
     particles.iter().for_each(|p| {
-        gizmos.sphere(p.x, 0.1, BLUE_500);
+        let color;
+        if p.p == 2 {
+            color = BLUE_500;
+        }
+        else if p.p == 3 {
+            color = ORANGE_500;
+        }
+        else if p.p == 5 {
+            color = LIME_500;
+        }
+        else {
+            color = GRAY_500;
+        }
+        gizmos.sphere(p.x, 0.15, color);
     });
 }
