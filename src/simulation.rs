@@ -14,6 +14,8 @@ const dynamic_viscosity: f32 = 0.1;
 const eos_stiffness: f32 = 10.0;
 const eos_power: f32 = 4.;
 
+const sim_max_pos: usize = 64;
+
 
 /// Langrangian Particle
 #[derive(Component, Clone, Copy)]
@@ -331,7 +333,7 @@ pub fn g2p (
         }
         p.c = b.mul_scalar(4.);
 
-        let end = (16 - (Chunk::EDGE_BUFFER_SIZE)) as f32;
+        let end = (sim_max_pos - (Chunk::EDGE_BUFFER_SIZE)) as f32;
 
         let local_pos = Chunk::index_to_node_local_pos(Chunk::node_world_pos_to_index(n.as_ivec3()));
 
@@ -356,10 +358,10 @@ pub fn initialize(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    for i in 0..4 {
-        for j in 0..4 { 
-            for k in 0..4 { 
-                grid.new_chunk(&IVec3::new(i, j, k));
+    for i in 0..sim_max_pos / Chunk::CHUNK_SIZE {
+        for j in 0..sim_max_pos / Chunk::CHUNK_SIZE { 
+            for k in 0..sim_max_pos / Chunk::CHUNK_SIZE { 
+                grid.new_chunk(&IVec3::new(i as i32, j as i32, k as i32));
             }
         }
     }
@@ -369,28 +371,28 @@ pub fn initialize(
         unlit: true,
         ..Default::default()
     });
-    let sphere_mesh = meshes.add(Sphere::new(0.2).mesh().ico(7).unwrap());
+    let sphere_mesh = meshes.add(Sphere::new(0.2).mesh().ico(1).unwrap());
 
 
-    for x in 8..24 {
-        for y in 8..24{
-            for z in 3..13 {
-                let pos = Vec3::new(x as f32/2., y as f32/2., z as f32/2.);
-                commands.spawn((
-                    Particle {
-                        x: pos,
-                        v: Vec3::ZERO,
-                        c: Mat3::ZERO,
-                        p: 2,
-                        m: 1.
-                    },
-                    Mesh3d(sphere_mesh.clone()),
-                    MeshMaterial3d(blue_material.clone()),
-                    Transform{translation: pos, ..Default::default()},
-                ));
-            }
-        }
-    }
+   // for x in 15..50 {
+   //     for y in 15..50{
+   //         for z in 15..50 {
+   //             let pos = Vec3::new(x as f32, y as f32, z as f32);
+   //             commands.spawn((
+   //                 Particle {
+   //                     x: pos,
+   //                     v: Vec3::ZERO,
+   //                     c: Mat3::ZERO,
+   //                     p: 2,
+   //                     m: 1.
+   //                 },
+   //                 Mesh3d(sphere_mesh.clone()),
+   //                 MeshMaterial3d(blue_material.clone()),
+   //                 Transform{translation: pos, ..Default::default()},
+   //             ));
+   //         }
+   //     }
+   // }
 }
 
 pub fn spawn(
@@ -401,6 +403,7 @@ pub fn spawn(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     ) {
+    // Meshes for '5' particles
     let sphere_mesh = meshes.add(Sphere::new(0.2).mesh().ico(7).unwrap());
     let green_material = materials.add(StandardMaterial{
         base_color: LIME_500.into(),
@@ -431,48 +434,73 @@ pub fn spawn(
         return;
     }
 
-    let orange_material = materials.add(StandardMaterial{
-        base_color: ORANGE_500.into(),
+    let blue_material = materials.add(StandardMaterial{
+        base_color: BLUE_500.into(),
         unlit: true,
         ..Default::default()
     });
-    // Spawn particles as a spout at the top
-    commands.spawn((
-        Particle {
-            x: Vec3::new(8., 12., 8.),
-            v: Vec3::ZERO,
-            c: Mat3::ZERO,
-            p: 3, 
-            m: 1.
-        },
-        Mesh3d(sphere_mesh.clone()),
-        MeshMaterial3d(orange_material.clone()),
-        Transform{translation: Vec3::new(8., 12., 8.), ..Default::default()},
+    let sphere_mesh = meshes.add(Sphere::new(0.2).mesh().ico(1).unwrap());
 
-    ));
+
+    for x in 50..55 {
+        for y in 50..55 {
+            let pos = Vec3::new(x as f32, y as f32, 5.);
+            commands.spawn((
+                    Particle {
+                        x: pos,
+                        v: Vec3::new(0., 0., 2.),
+                        c: Mat3::ZERO,
+                        p: 2,
+                        m: 1.
+                    },
+                    Mesh3d(sphere_mesh.clone()),
+                    MeshMaterial3d(blue_material.clone()),
+                    Transform{translation: pos, ..Default::default()},
+                    ));
+        }
+    }
+
+   // let orange_material = materials.add(StandardMaterial{
+   //     base_color: ORANGE_500.into(),
+   //     unlit: true,
+   //     ..Default::default()
+   // });
+   // // Spawn particles as a spout at the top
+   // commands.spawn((
+   //     Particle {
+   //         x: Vec3::new(8., 12., 8.),
+   //         v: Vec3::ZERO,
+   //         c: Mat3::ZERO,
+   //         p: 3, 
+   //         m: 1.
+   //     },
+   //     Mesh3d(sphere_mesh.clone()),
+   //     MeshMaterial3d(orange_material.clone()),
+   //     Transform{translation: Vec3::new(8., 12., 8.), ..Default::default()},
+
+   // ));
 }
 
 pub fn draw(
     mut particles: Query<(&mut Particle, &mut Transform)>,
-    grid: Res<Grid>,
     mut gizmos: Gizmos,
-    mut draw_state: ResMut<DrawState>,
+    draw_state: Res<DrawState>,
 ) {
-    gizmos.cuboid( 
-        Transform::from_translation(Vec3::from((8., 8., 8.))).with_scale(Vec3::splat(16.)),
-        GHOST_WHITE
-        );
-    for i in 0..5 {
-        for j in 0..5 {
-            for k in 0..5 {
-                gizmos.sphere(Vec3::from((i as f32, j as f32, k as f32)) * 4., 0.05, GHOST_WHITE);
-            }}}
+    particles.iter_mut().for_each(|(p, mut t)| {
+        t.translation = p.x;
+    });
 
     if draw_state.0 == false {
         return;
     }
+    gizmos.cuboid( 
+        Transform::from_translation(Vec3::from((sim_max_pos as f32 / 2., sim_max_pos as f32 / 2., sim_max_pos as f32 / 2.))).with_scale(Vec3::splat(sim_max_pos as f32)),
+        GHOST_WHITE
+        );
+    for i in 0..(sim_max_pos / Chunk::CHUNK_SIZE) + 1 {
+        for j in 0..(sim_max_pos / Chunk::CHUNK_SIZE) + 1 {
+            for k in 0..(sim_max_pos / Chunk::CHUNK_SIZE) + 1 {
+                gizmos.sphere(Vec3::from((i as f32, j as f32, k as f32)) * 4., 0.05, GHOST_WHITE);
+            }}}
 
-    particles.iter_mut().for_each(|(p, mut t)| {
-        t.translation = p.x;
-    });
 }
