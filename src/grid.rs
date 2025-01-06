@@ -40,6 +40,7 @@ impl Chunk {
     /// Chunk coords of chunk responsible for that Node
     ///        
     /// Test Written and Passed
+    #[inline]
     pub fn node_world_pos_to_chunk_pos(nwp: IVec3) -> IVec3 {
         let ichunk = Chunk::CHUNK_SIZE as i32; 
         // Adjusts for off by 1 for negatives because np 0,0,0 is in cp 0,0,0
@@ -58,6 +59,7 @@ impl Chunk {
     /// Index of node in its chunk
     ///
     /// Test Written and Passed
+    #[inline]
     pub fn node_world_pos_to_index(nwp: IVec3) -> usize {
         let ichunk = Chunk::CHUNK_SIZE as i32;
         let nlp = nwp.rem_euclid(IVec3::splat(ichunk)); // Node World Position => Node Local Position 

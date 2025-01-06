@@ -2,8 +2,9 @@
 
 use rayon::prelude::*;
 use crate::{DrawState, SpawnState, SpawnBuffer, DespawnBuffer};
-use bevy::{prelude::*, gizmos::gizmos, color::palettes::{tailwind::{RED_500, BLUE_500, ORANGE_500, LIME_500, GRAY_500}, css::GHOST_WHITE}};
+use bevy::{prelude::*, gizmos::gizmos, color::palettes::{tailwind::{RED_500, BLUE_500, ORANGE_500, LIME_500, GRAY_500}, css::GHOST_WHITE}, math::{Vec3A, Mat3A}};
 use std::collections::HashMap;
+use bevy::log::*;
 
 use crate::grid::*;
 
@@ -20,9 +21,9 @@ const sim_max_pos: usize = 64;
 /// Langrangian Particle
 #[derive(Component, Clone, Copy)]
 pub struct Particle {
-    x: Vec3,    // Position
-    v: Vec3,    // Velocity
-    c: Mat3,    // Affine Momentum Matrix
+    x: Vec3A,    // Position
+    v: Vec3A,    // Velocity
+    c: Mat3A,    // Affine Momentum Matrix
     m: f32,     // Mass
     p: u16    // material prime index
 }
@@ -30,14 +31,14 @@ pub struct Particle {
 /// Eulerian Grid Node
 #[derive(Copy, Clone)]
 pub struct Node {
-    v: Vec3,    // Velocity
+    v: Vec3A,    // Velocity
     m: f32,     // Mass
     p: u32,     // Material Number
 }
 
 impl Default for Node {
     fn default() -> Self {
-        Node { v: Vec3::ZERO, m: 0., p: 1}
+        Node { v: Vec3A::ZERO, m: 0., p: 1}
     }
 }
 
@@ -45,7 +46,7 @@ impl Node {
     fn zero(&mut self) {
         self.p = 1;
         self.m = 0.0;
-        self.v = Vec3::ZERO;
+        self.v = Vec3A::ZERO;
     }
 }
 
@@ -77,18 +78,18 @@ pub fn p2g1 (
 
 
         // Buffer to store new node informatio nin to avoid locking mutex 27 times
-        let mut node_buffer: HashMap<IVec3, Vec<(usize, f32, Vec3)>> = HashMap::new();
+        let mut node_buffer: HashMap<IVec3, Vec<(usize, f32, Vec3A)>> = HashMap::new();
 
         // Calculate contributions of langrangian particle to euclidean grid
         for i in 0..3 { 
             for j in 0..3 {
                 for k in 0..3 {
                     let weight = w[i].x * w[j].y * w[k].z; // Quadratic B-Spline  
-                    let curr_x = Vec3::from([
+                    let curr_x = Vec3A::new(
                                             n.x + (i as f32) - 1.,
                                             n.y + (j as f32) - 1.,
                                             n.z + (k as f32) - 1.,
-                    ]);
+                    );
                     let icurr_x = curr_x.as_ivec3();
                     let curr_dx = (curr_x - p.x) + 0.5; // p distance to current n
 
@@ -96,28 +97,30 @@ pub fn p2g1 (
                     // Pre-calculate values we will send to mutex
                     let q = p.c * curr_dx;
                     let mass_contrib = weight * p.m;
-                    let v_contrib = mass_contrib * (p.v + Vec3::from(q));
-
+                    let v_contrib = mass_contrib * (p.v + Vec3A::from(q));
                     // Get Mutex
                     let chunk_pos = Chunk::node_world_pos_to_chunk_pos(icurr_x); 
                     let node_index = Chunk::node_world_pos_to_index(icurr_x);
 
+                    let mut chunk = grid.get(&chunk_pos).expect("Particle out of bounds p2g1").lock().expect("Error locking mutex for p2g1");
+                    chunk[node_index].m += mass_contrib;
+                    chunk[node_index].v += v_contrib
                     // Append nodes to node buffer
-                    node_buffer.entry(chunk_pos).or_insert(vec![]).push((node_index, mass_contrib, v_contrib));
+                    //node_buffer.entry(chunk_pos).or_insert(vec![]).push((node_index, mass_contrib, v_contrib));
                     
                 }
             }
         }
 
         // Lock the mutexes and write the Nod data
-        for (chunk, nodes) in node_buffer {
-            let mut chunk = grid.get(&chunk).expect("Particle out of bounds p2g1").lock().expect("Error locking mutex for p2g1");
-            for node in nodes {
-                chunk[node.0].m += node.1;
-                chunk[node.0].v += node.2;
-            }
-            std::mem::drop(chunk); // Unlock Mutex
-        }
+        //for (chunk, nodes) in node_buffer {
+        //    let mut chunk = grid.get(&chunk).expect("Particle out of bounds p2g1").lock().expect("Error locking mutex for p2g1");
+        //    for node in nodes {
+        //        chunk[node.0].m += node.1;
+        //        chunk[node.0].v += node.2;
+        //    }
+        //    std::mem::drop(chunk); // Unlock Mutex
+        //}
     });
 }
 
@@ -142,7 +145,7 @@ pub fn p2g2 (
             for j in 0..3 {
                 for k in 0..3 {
                     let weight = w[i].x * w[j].y * w[k].z; // Quadratic B-Spline  
-                    let curr_x = Vec3::from([
+                    let curr_x = Vec3A::from([
                                             n.x + (i as f32) - 1.,
                                             n.y + (j as f32) - 1.,
                                             n.z + (k as f32) - 1.,
@@ -153,6 +156,7 @@ pub fn p2g2 (
                     let chunk_index = Chunk::node_world_pos_to_chunk_pos(icurr_x); 
                     let n_index = Chunk::node_world_pos_to_index(icurr_x);
                     // TODO: Could be improved by pre-fetching masses
+                    //
                     let mut chunk = grid.get(&chunk_index).expect("Particle somehow out of bounds of loaded chunks").lock().expect("Error locking mutex for p2g");
 
                     // Do work inside mutex
@@ -169,7 +173,7 @@ pub fn p2g2 (
         let volume = p.m / density;
         let pressure = (-0.1_f32).max(eos_stiffness * (density / rest_density).powf(eos_power) - 1.);
         // Identity Matrix
-        let mut stress = Mat3::from_cols_array(&[
+        let mut stress = Mat3A::from_cols_array(&[
                                                -pressure, 0., 0., 
                                                0., -pressure, 0.,
                                                0., 0., -pressure,
@@ -190,7 +194,7 @@ pub fn p2g2 (
             for j in 0..3 {
                 for k in 0..3 {
                     let weight = w[i].x * w[j].y * w[k].z; // Quadratic B-Spline  
-                    let curr_x = Vec3::from([
+                    let curr_x = Vec3A::from([
                                             n.x + (i as f32) - 1.,
                                             n.y + (j as f32) - 1.,
                                             n.z + (k as f32) - 1.,
@@ -198,9 +202,10 @@ pub fn p2g2 (
                     let icurr_x = curr_x.as_ivec3();
                     let curr_dx = (curr_x - p.x) + 0.5; // p distance to current n
                                                         
-                    let momentum = Vec3::from(eq_16_term_0 * weight * curr_dx);
+                    let momentum = Vec3A::from(eq_16_term_0 * weight * curr_dx);
 
                     // Get Mutex
+                    //
                     let chunk_index = Chunk::node_world_pos_to_chunk_pos(icurr_x); 
                     let n_index = Chunk::node_world_pos_to_index(icurr_x);
                     let mut chunk = grid.get(&chunk_index).expect("Particle somehow out of bounds of loaded chunks").lock().expect("Error locking mutex for p2g");
@@ -248,12 +253,13 @@ pub fn update_grid (
 
             if node.p % 6 == 0 {
                 let mut sb = spawn_buf.0.lock().unwrap();
+                let x: Vec3A = Vec3A::from((nlp.as_vec3() + (chunk_pos.as_vec3() * Chunk::CHUNK_SIZE as f32)) + Vec3::splat(0.5)) + (node.v.normalize() * -0.25);
                 sb.push(Particle{
-                    x: (nlp.as_ivec3() + (chunk_pos * Chunk::CHUNK_SIZE as i32)).as_vec3() + Vec3::splat(0.5) + (node.v.normalize() * -0.25),
+                    x, 
                     m: 2.,
                     p: 5,
-                    c: Mat3::ZERO,
-                    v: Vec3::ZERO,
+                    c: Mat3A::ZERO,
+                    v: Vec3A::ZERO,
                 });
                 node.p = 6;
             }
@@ -268,7 +274,7 @@ pub fn update_grid (
 
             if chunk_edge_mask != 0 {
                 let node_edge_mask = Chunk::node_local_pos_to_edge_mask(nlp);
-                if node_edge_mask & chunk_edge_mask != 0 {node.v = Vec3::ZERO};
+                if node_edge_mask & chunk_edge_mask != 0 {node.v = Vec3A::ZERO};
             }
         });
     });
@@ -280,24 +286,24 @@ pub fn g2p (
     despawn_buf: Res<DespawnBuffer>,
 ) {
    particles.par_iter_mut().for_each(|(e, mut p)| {
-        p.v = Vec3::ZERO;
+        p.v = Vec3A::ZERO;
 
         let n = p.x.trunc(); // Truncates decimal part of float, leaving integer part
-        let dx: Vec3 = p.x.fract() - 0.5; // How far away the particle is away from the node
+        let dx: Vec3A = p.x.fract() - 0.5; // How far away the particle is away from the node
         
-        let w: [Vec3; 3]= [
+        let w: [Vec3A; 3]= [
             0.5 * (0.5 - dx).powf(2.),
             0.75 - (dx).powf(2.),
             0.5 * (0.5 + dx).powf(2.),
         ];
 
-        let mut b = Mat3::ZERO;
+        let mut b = Mat3A::ZERO;
         let mut edge_mask = 0; 
         for i in 0..3 {
             for j in 0..3 {
                 for k in 0..3 {
                     let weight = w[i].x * w[j].y * w[k].z; // Quadratic B-Spline  
-                    let curr_x = Vec3::from([
+                    let curr_x = Vec3A::from([
                         n.x + (i as f32) - 1.,
                         n.y + (j as f32) - 1.,
                         n.z + (k as f32) - 1.,
@@ -325,7 +331,7 @@ pub fn g2p (
                     std::mem::drop(chunk); // Unlock Mutex
 
                     w_v *= weight;
-                    let term = Mat3::from_cols(w_v * curr_dx.x, w_v * curr_dx.y, w_v * curr_dx.z);
+                    let term = Mat3A::from_cols(w_v * curr_dx.x, w_v * curr_dx.y, w_v * curr_dx.z);
                     b += term;
                     p.v += w_v;
                 }
@@ -404,7 +410,7 @@ pub fn spawn(
     mut materials: ResMut<Assets<StandardMaterial>>,
     ) {
     // Meshes for '5' particles
-    let sphere_mesh = meshes.add(Sphere::new(0.2).mesh().ico(7).unwrap());
+    let sphere_mesh = meshes.add(Sphere::new(0.2).mesh().ico(0).unwrap());
     let green_material = materials.add(StandardMaterial{
         base_color: LIME_500.into(),
         unlit: true,
@@ -417,7 +423,7 @@ pub fn spawn(
                 p.clone(),
                 Mesh3d(sphere_mesh.clone()),
                 MeshMaterial3d(green_material.clone()),
-                Transform{translation: p.x.clone() , ..Default::default()},
+                Transform{translation: Vec3::from(p.x.clone()) , ..Default::default()},
 
         ));
     }
@@ -439,23 +445,23 @@ pub fn spawn(
         unlit: true,
         ..Default::default()
     });
-    let sphere_mesh = meshes.add(Sphere::new(0.2).mesh().ico(1).unwrap());
+    let sphere_mesh = meshes.add(Sphere::new(0.2).mesh().ico(0).unwrap());
 
 
     for x in 50..55 {
         for y in 50..55 {
-            let pos = Vec3::new(x as f32, y as f32, 5.);
+            let pos = Vec3A::new(x as f32, y as f32, 5.);
             commands.spawn((
                     Particle {
                         x: pos,
-                        v: Vec3::new(0., 0., 2.),
-                        c: Mat3::ZERO,
+                        v: Vec3A::new(0., 0., 2.),
+                        c: Mat3A::ZERO,
                         p: 2,
                         m: 1.
                     },
                     Mesh3d(sphere_mesh.clone()),
                     MeshMaterial3d(blue_material.clone()),
-                    Transform{translation: pos, ..Default::default()},
+                    Transform{translation: Vec3::from(pos), ..Default::default()},
                     ));
         }
     }
@@ -487,7 +493,7 @@ pub fn draw(
     draw_state: Res<DrawState>,
 ) {
     particles.iter_mut().for_each(|(p, mut t)| {
-        t.translation = p.x;
+        t.translation = Vec3::from(p.x);
     });
 
     if draw_state.0 == false {
