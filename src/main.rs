@@ -24,6 +24,7 @@ pub struct SpawnBuffer(Mutex<Vec<Particle>>);
 #[derive(Resource)]
 pub struct DespawnBuffer(Mutex<Vec<Entity>>);
 
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
@@ -31,7 +32,7 @@ fn main() {
         .add_plugins(PlayerPlugin)
         .insert_resource(Grid(HashMap::new()))
         .insert_resource(DrawState(false))
-        .insert_resource(SpawnState(false))
+        .insert_resource(SpawnState(true))
         .insert_resource(Time::<Fixed>::from_seconds(0.05))
         .insert_resource(SpawnBuffer(Mutex::new(vec![])))
         .insert_resource(DespawnBuffer(Mutex::new(vec![])))

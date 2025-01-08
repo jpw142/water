@@ -65,7 +65,6 @@ pub fn p2g1 (
     grid: ResMut<Grid>,
     query: Query<&Particle>,
     ) {
-    //.par_iter_mut()
     query.par_iter().for_each(|p| {
         let n = p.x.trunc(); // Truncates decimal part of float, leaving integer part
         let dx = p.x.fract() - 0.5; // How far away the particle is away from the node
@@ -78,41 +77,76 @@ pub fn p2g1 (
 
 
         // Buffer to store new node informatio nin to avoid locking mutex 27 times
-        let mut node_buffer: HashMap<IVec3, Vec<(usize, f32, Vec3A)>> = HashMap::new();
+        //let mut node_buffer: HashMap<IVec3, Vec<(usize, f32, Vec3A)>> = HashMap::new();
 
-        // Calculate contributions of langrangian particle to euclidean grid
-        for i in 0..3 { 
-            for j in 0..3 {
-                for k in 0..3 {
-                    let weight = w[i].x * w[j].y * w[k].z; // Quadratic B-Spline  
-                    let curr_x = Vec3A::new(
-                                            n.x + (i as f32) - 1.,
-                                            n.y + (j as f32) - 1.,
-                                            n.z + (k as f32) - 1.,
-                    );
-                    let icurr_x = curr_x.as_ivec3();
-                    let curr_dx = (curr_x - p.x) + 0.5; // p distance to current n
+        let results : [(IVec3, usize, f32, Vec3A); 27] = core::array::from_fn(|index| {
+            let i = index / 9;
+            let j = (index % 9) / 3; 
+            let k = index % 3;
 
+            let weight = w[i].x * w[j].y * w[k].z;
 
-                    // Pre-calculate values we will send to mutex
-                    let q = p.c * curr_dx;
-                    let mass_contrib = weight * p.m;
-                    let v_contrib = mass_contrib * (p.v + Vec3A::from(q));
-                    // Get Mutex
-                    let chunk_pos = Chunk::node_world_pos_to_chunk_pos(icurr_x); 
-                    let node_index = Chunk::node_world_pos_to_index(icurr_x);
+            let curr_x = n + (Vec3A::new(i as f32, j as f32, k as f32) - Vec3A::ONE);
+            let curr_dx = (curr_x - p.x) + 0.5;
 
-                    let mut chunk = grid.get(&chunk_pos).expect("Particle out of bounds p2g1").lock().expect("Error locking mutex for p2g1");
-                    chunk[node_index].m += mass_contrib;
-                    chunk[node_index].v += v_contrib
-                    // Append nodes to node buffer
-                    //node_buffer.entry(chunk_pos).or_insert(vec![]).push((node_index, mass_contrib, v_contrib));
-                    
-                }
+            let q = p.c * curr_dx;
+            
+            // Contribution to the grid based on a quadratic BSpline weighting
+            let mass_contribution = weight * p.m;
+            let velocity_contribution = mass_contribution * (p.v + Vec3A::from(q));
+
+            let chunk_pos = Chunk::node_world_pos_to_chunk_pos(curr_x.as_ivec3()); 
+            let node_index = Chunk::node_world_pos_to_index(curr_x.as_ivec3());
+
+            (chunk_pos, node_index, mass_contribution, velocity_contribution)
+        });
+
+        let mut current_chunk = results[0].0;
+        let mut chunk_lock = grid.get(&current_chunk).expect("Particle out of bounds p2g1").lock().unwrap();
+
+        for (chunk, index, mass, velocity) in results {
+            if chunk != current_chunk {
+                drop(chunk_lock);
+                chunk_lock = grid.get(&chunk).expect("Particle out of bounds p2g1").lock().unwrap();
+                current_chunk = chunk;
             }
+            chunk_lock[index].m += mass;
+            chunk_lock[index].v += velocity;
         }
 
-        // Lock the mutexes and write the Nod data
+        // Calculate contributions of langrangian particle to euclidean grid
+        //for i in 0..3 {
+        //    for j in 0..3 {
+        //        for k in 0..3 { 
+        //            let weight = w[i].x * w[j].y * w[k].z; // Quadratic B-Spline  
+        //            let curr_x = Vec3A::new(
+        //                                    n.x + (i as f32) - 1.,
+        //                                    n.y + (j as f32) - 1.,
+        //                                    n.z + (k as f32) - 1.,
+        //            );
+        //            let icurr_x = curr_x.as_ivec3();
+        //            let curr_dx = (curr_x - p.x) + 0.5; // p distance to current n
+
+
+        //            // Pre-calculate values we will send to mutex
+        //            let q = p.c * curr_dx;
+        //            let mass_contrib = weight * p.m;
+        //            let v_contrib = mass_contrib * (p.v + Vec3A::from(q));
+        //            // Get Mutex
+        //            let chunk_pos = Chunk::node_world_pos_to_chunk_pos(icurr_x); 
+        //            let node_index = Chunk::node_world_pos_to_index(icurr_x);
+
+        //            let mut chunk = grid.get(&chunk_pos).expect("Particle out of bounds p2g1").lock().expect("Error locking mutex for p2g1");
+        //            chunk[node_index].m += mass_contrib;
+        //            chunk[node_index].v += v_contrib
+        //            // Append nodes to node buffer
+        //            //node_buffer.entry(chunk_pos).or_insert(vec![]).push((node_index, mass_contrib, v_contrib));
+        //            
+        //        }
+        //    }
+        //}
+
+        //Lock the mutexes and write the Nod data
         //for (chunk, nodes) in node_buffer {
         //    let mut chunk = grid.get(&chunk).expect("Particle out of bounds p2g1").lock().expect("Error locking mutex for p2g1");
         //    for node in nodes {
@@ -155,7 +189,7 @@ pub fn p2g2 (
                     // Get Mutex
                     let chunk_index = Chunk::node_world_pos_to_chunk_pos(icurr_x); 
                     let n_index = Chunk::node_world_pos_to_index(icurr_x);
-                    // TODO: Could be improved by pre-fetching masses
+                   // TODO: Could be improved by pre-fetching masses
                     //
                     let mut chunk = grid.get(&chunk_index).expect("Particle somehow out of bounds of loaded chunks").lock().expect("Error locking mutex for p2g");
 
