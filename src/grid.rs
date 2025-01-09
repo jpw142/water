@@ -1,8 +1,8 @@
 use std::ops::{Deref, DerefMut};
-use std::sync::Mutex;
-use std::collections::HashMap;
+use parking_lot::Mutex;
 use crate::simulation::Node;
 
+use bevy::utils::hashbrown::HashMap;
 use bevy::prelude::*;
 
 ///
@@ -122,7 +122,7 @@ impl DerefMut for Chunk { fn deref_mut(&mut self) -> &mut Self::Target { &mut se
 
 // Eulerian Grid Container 
 #[derive(Resource)]
-pub struct Grid (pub HashMap<IVec3, Mutex<Chunk>>);
+pub struct Grid (pub bevy::utils::HashMap<IVec3, Mutex<Chunk>>);
 
 impl Grid {
     /// Inserts a new chunk at pos with its correct edge_mask
@@ -156,27 +156,27 @@ impl Grid {
         // Otherwise update your own edge mask
 
         if let Some(c) = self.get(&(pos + IVec3::new(0, -1, 0))) {
-            let mut chunk = c.lock().expect("Error locking chunk in new_chunk");
+            let mut chunk = c.lock();
             chunk.edge_mask &= 0b011111;
         } else {edge_mask |= 1;}
         if let Some(c) = self.get(&(pos + IVec3::new(0, 0, -1))) {
-            let mut chunk = c.lock().expect("Error locking chunk in new_chunk");
+            let mut chunk = c.lock();
             chunk.edge_mask &= 0b101111;
         } else {edge_mask |= 1 << 1}
         if let Some(c) = self.get(&(pos + IVec3::new(-1, 0, 0))) {
-            let mut chunk = c.lock().expect("Error locking chunk in new_chunk");
+            let mut chunk = c.lock();
             chunk.edge_mask &= 0b110111;
         } else {edge_mask |= 1 << 2}
         if let Some(c) = self.get(&(pos + IVec3::new(1, 0, 0))) {
-            let mut chunk = c.lock().expect("Error locking chunk in new_chunk");
+            let mut chunk = c.lock();
             chunk.edge_mask &= 0b111011;
         } else {edge_mask |= 1 << 3}
         if let Some(c) = self.get(&(pos + IVec3::new(0, 0, 1))) {
-            let mut chunk = c.lock().expect("Error locking chunk in new_chunk");
+            let mut chunk = c.lock();
             chunk.edge_mask &= 0b111101;
         } else {edge_mask |= 1 << 4}
         if let Some(c) = self.get(&(pos + IVec3::new(0, 1, 0))) {
-            let mut chunk = c.lock().expect("Error locking chunk in new_chunk");
+            let mut chunk = c.lock();
             chunk.edge_mask &= 0b111110;
         } else {edge_mask |= 1 << 5}
         
@@ -257,7 +257,7 @@ mod tests {
         let mut grid = Grid(HashMap::new());
         grid.new_chunk(&IVec3::ZERO);
 
-        let chunk = grid.get(&IVec3::ZERO).unwrap().lock().unwrap();
+        let chunk = grid.get(&IVec3::ZERO).unwrap().lock();
         assert!(chunk.edge_mask == 0b111111)
     }
 
@@ -272,13 +272,13 @@ mod tests {
         grid.new_chunk(&IVec3::new(0, -1, 0));
         grid.new_chunk(&IVec3::new(-1, 0, 0));
 
-        let chunk0 = grid.get(&IVec3::ZERO).unwrap().lock().unwrap();
-        let chunk1 = grid.get(&IVec3::new(0, 0, 1)).unwrap().lock().unwrap();
-        let chunk2 = grid.get(&IVec3::new(0, 1, 0)).unwrap().lock().unwrap();
-        let chunk3 = grid.get(&IVec3::new(1, 0, 0)).unwrap().lock().unwrap();
-        let chunk4 = grid.get(&IVec3::new(0, 0, -1)).unwrap().lock().unwrap();
-        let chunk5 = grid.get(&IVec3::new(0, -1, 0)).unwrap().lock().unwrap();
-        let chunk6 = grid.get(&IVec3::new(-1, 0, 0)).unwrap().lock().unwrap();
+        let chunk0 = grid.get(&IVec3::ZERO).unwrap().lock();
+        let chunk1 = grid.get(&IVec3::new(0, 0, 1)).unwrap().lock();
+        let chunk2 = grid.get(&IVec3::new(0, 1, 0)).unwrap().lock();
+        let chunk3 = grid.get(&IVec3::new(1, 0, 0)).unwrap().lock();
+        let chunk4 = grid.get(&IVec3::new(0, 0, -1)).unwrap().lock();
+        let chunk5 = grid.get(&IVec3::new(0, -1, 0)).unwrap().lock();
+        let chunk6 = grid.get(&IVec3::new(-1, 0, 0)).unwrap().lock();
         println!("{:b}", chunk0.edge_mask);
         assert!(chunk0.edge_mask == 0b0);
         assert!(chunk1.edge_mask == 0b111101);

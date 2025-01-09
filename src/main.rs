@@ -3,7 +3,7 @@ mod simulation;
 
 use crate::grid::*;
 use crate::simulation::*;
-use std::collections::HashMap;
+use bevy::utils::hashbrown::HashMap;
 use bevy::prelude::*;
 use std::sync::Mutex;
 

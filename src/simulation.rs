@@ -3,7 +3,7 @@
 use rayon::prelude::*;
 use crate::{DrawState, SpawnState, SpawnBuffer, DespawnBuffer};
 use bevy::{prelude::*, gizmos::gizmos, color::palettes::{tailwind::{RED_500, BLUE_500, ORANGE_500, LIME_500, GRAY_500}, css::GHOST_WHITE}, math::{Vec3A, Mat3A}};
-use std::collections::HashMap;
+use bevy::utils::hashbrown::HashMap;
 use bevy::log::*;
 
 use crate::grid::*;
@@ -53,8 +53,8 @@ impl Node {
 
 /// Sets all nodes in the grid to 0
 pub fn clear_grid ( mut grid: ResMut<Grid> ) {
-    grid.par_iter_mut().for_each(|(_, c)| {
-        let mut chunk = c.lock().expect("Error locking Mutex for clear_grid");
+    grid.0.iter().par_bridge().for_each(|(_, c)| {
+        let mut chunk = c.lock();
         chunk.iter_mut().for_each(|node| {
             node.zero();
         });
@@ -102,59 +102,17 @@ pub fn p2g1 (
         });
 
         let mut current_chunk = results[0].0;
-        let mut chunk_lock = grid.get(&current_chunk).expect("Particle out of bounds p2g1").lock().unwrap();
+        let mut chunk_lock = grid.get(&current_chunk).expect("Particle out of bounds p2g1").lock();
 
         for (chunk, index, mass, velocity) in results {
             if chunk != current_chunk {
                 drop(chunk_lock);
-                chunk_lock = grid.get(&chunk).expect("Particle out of bounds p2g1").lock().unwrap();
+                chunk_lock = grid.get(&chunk).expect("Particle out of bounds p2g1").lock();
                 current_chunk = chunk;
             }
             chunk_lock[index].m += mass;
             chunk_lock[index].v += velocity;
         }
-
-        // Calculate contributions of langrangian particle to euclidean grid
-        //for i in 0..3 {
-        //    for j in 0..3 {
-        //        for k in 0..3 { 
-        //            let weight = w[i].x * w[j].y * w[k].z; // Quadratic B-Spline  
-        //            let curr_x = Vec3A::new(
-        //                                    n.x + (i as f32) - 1.,
-        //                                    n.y + (j as f32) - 1.,
-        //                                    n.z + (k as f32) - 1.,
-        //            );
-        //            let icurr_x = curr_x.as_ivec3();
-        //            let curr_dx = (curr_x - p.x) + 0.5; // p distance to current n
-
-
-        //            // Pre-calculate values we will send to mutex
-        //            let q = p.c * curr_dx;
-        //            let mass_contrib = weight * p.m;
-        //            let v_contrib = mass_contrib * (p.v + Vec3A::from(q));
-        //            // Get Mutex
-        //            let chunk_pos = Chunk::node_world_pos_to_chunk_pos(icurr_x); 
-        //            let node_index = Chunk::node_world_pos_to_index(icurr_x);
-
-        //            let mut chunk = grid.get(&chunk_pos).expect("Particle out of bounds p2g1").lock().expect("Error locking mutex for p2g1");
-        //            chunk[node_index].m += mass_contrib;
-        //            chunk[node_index].v += v_contrib
-        //            // Append nodes to node buffer
-        //            //node_buffer.entry(chunk_pos).or_insert(vec![]).push((node_index, mass_contrib, v_contrib));
-        //            
-        //        }
-        //    }
-        //}
-
-        //Lock the mutexes and write the Nod data
-        //for (chunk, nodes) in node_buffer {
-        //    let mut chunk = grid.get(&chunk).expect("Particle out of bounds p2g1").lock().expect("Error locking mutex for p2g1");
-        //    for node in nodes {
-        //        chunk[node.0].m += node.1;
-        //        chunk[node.0].v += node.2;
-        //    }
-        //    std::mem::drop(chunk); // Unlock Mutex
-        //}
     });
 }
 
@@ -191,13 +149,10 @@ pub fn p2g2 (
                     let n_index = Chunk::node_world_pos_to_index(icurr_x);
                    // TODO: Could be improved by pre-fetching masses
                     //
-                    let mut chunk = grid.get(&chunk_index).expect("Particle somehow out of bounds of loaded chunks").lock().expect("Error locking mutex for p2g");
+                    let mut chunk = grid.get(&chunk_index).expect("Particle somehow out of bounds of loaded chunks").lock();
 
                     // Do work inside mutex
                     density += chunk[n_index].m * weight;
-                    if i == 0 && j == 0 && k == 0 {
-                        chunk[n_index].p *= p.p as u32;
-                    }
 
                     std::mem::drop(chunk); // Unlock Mutex
                 }
@@ -242,11 +197,14 @@ pub fn p2g2 (
                     //
                     let chunk_index = Chunk::node_world_pos_to_chunk_pos(icurr_x); 
                     let n_index = Chunk::node_world_pos_to_index(icurr_x);
-                    let mut chunk = grid.get(&chunk_index).expect("Particle somehow out of bounds of loaded chunks").lock().expect("Error locking mutex for p2g");
+                    let mut chunk = grid.get(&chunk_index).expect("Particle somehow out of bounds of loaded chunks").lock();
 
 
                     // Do work inside mutex
                     chunk[n_index].v += momentum;
+                    if i == 0 && j == 0 && k == 0 {
+                        chunk[n_index].p *= p.p as u32;
+                    }
 
                     std::mem::drop(chunk); // Unlock Mutex
                 }
@@ -277,8 +235,8 @@ pub fn update_grid (
     grid: Res<Grid>,
     spawn_buf: Res<SpawnBuffer>,
 ) {
-    grid.par_iter().for_each(|(chunk_pos, c)| {
-        let mut chunk = c.lock().expect("Error locking Mutex for update_grid");
+    grid.0.iter().par_bridge().for_each(|(chunk_pos, c)| {
+        let mut chunk = c.lock();
         let chunk_edge_mask = chunk.edge_mask;
 
         chunk.iter_mut().enumerate().for_each(|(i, node)| {
@@ -347,7 +305,7 @@ pub fn g2p (
                     // Get Mutex
                     let chunk_index = Chunk::node_world_pos_to_chunk_pos(icurr_x); 
                     let n_index = Chunk::node_world_pos_to_index(icurr_x);
-                    let mut chunk = grid.get(&chunk_index).expect("Particle somehow out of bounds of loaded chunks").lock().expect("Error locking mutex for p2g");
+                    let mut chunk = grid.get(&chunk_index).expect("Particle somehow out of bounds of loaded chunks").lock();
 
                     // Do work inside mutex
                     let mut w_v = chunk[n_index].v;
@@ -452,7 +410,9 @@ pub fn spawn(
     });
     // Spawn any particles due to be spawned
     let mut sb = spawn_buf.0.lock().unwrap();
+
     for p in sb.drain(..) {
+        // Change to spawn_batch
         commands.spawn((
                 p.clone(),
                 Mesh3d(sphere_mesh.clone()),
