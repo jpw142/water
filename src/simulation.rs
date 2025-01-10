@@ -425,25 +425,31 @@ pub fn spawn(
     mut particles: ResMut<Particles>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     ) {
-    // Meshes for '5' particles
+    // Meshes for particles
     let sphere_mesh = meshes.add(Sphere::new(0.2).mesh().ico(0).unwrap());
+
+    // Material COlors
     let green_material = materials.add(StandardMaterial{
         base_color: LIME_500.into(),
         unlit: true,
         ..Default::default()
     });
+    let blue_material = materials.add(StandardMaterial{
+        base_color: BLUE_500.into(),
+        unlit: true,
+        ..Default::default()
+    });
+
     // Spawn any particles due to be spawned
     let mut sb = spawn_buf.0.lock().unwrap();
 
     for p in sb.drain(..) {
         // Change to spawn_batch
         commands.spawn((
-                p.clone(),
                 Mesh3d(sphere_mesh.clone()),
-                MeshMaterial3d(green_material.clone()),
+                MeshMaterial3d(blue_material.clone()),
                 Transform{translation: Vec3::from(p.x.clone()) , ..Default::default()},
-
-        ));
+                ));
     }
     drop(sb);
 
@@ -469,61 +475,27 @@ pub fn spawn(
                 p: 2,
                 m: 1.,
             });
-        
+            commands.spawn((
+                    Mesh3d(sphere_mesh.clone()),
+                    MeshMaterial3d(green_material.clone()),
+                    Transform{translation: pos.into(), ..Default::default()},
+                    ));
+
         }
     }
     particles.append(&mut temp_vec);
-
-    //let blue_material = materials.add(StandardMaterial{
-    //    base_color: BLUE_500.into(),
-    //    unlit: true,
-    //    ..Default::default()
-    //});
-    //let sphere_mesh = meshes.add(Sphere::new(0.2).mesh().ico(0).unwrap());
-
-
-    //for x in 50..55 {
-    //    for y in 50..55 {
-    //        let pos = Vec3A::new(x as f32, y as f32, 5.);
-    //        commands.spawn((
-    //                Particle {
-    //                    x: pos,
-    //                    v: Vec3A::new(0., 0., 2.),
-    //                    c: Mat3A::ZERO,
-    //                    p: 2,
-    //                    m: 1.
-    //                },
-    //                Mesh3d(sphere_mesh.clone()),
-    //                MeshMaterial3d(blue_material.clone()),
-    //                Transform{translation: Vec3::from(pos), ..Default::default()},
-    //                ));
-    //    }
-    //}
 
    // let orange_material = materials.add(StandardMaterial{
    //     base_color: ORANGE_500.into(),
    //     unlit: true,
    //     ..Default::default()
    // });
-   // // Spawn particles as a spout at the top
-   // commands.spawn((
-   //     Particle {
-   //         x: Vec3::new(8., 12., 8.),
-   //         v: Vec3::ZERO,
-   //         c: Mat3::ZERO,
-   //         p: 3, 
-   //         m: 1.
-   //     },
-   //     Mesh3d(sphere_mesh.clone()),
-   //     MeshMaterial3d(orange_material.clone()),
-   //     Transform{translation: Vec3::new(8., 12., 8.), ..Default::default()},
-
-   // ));
 }
 
 pub fn draw(
     //mut particles: Query<(&mut Particle, &mut Transform)>,
     particles: ResMut<Particles>,
+    mut balls: Query<&mut Transform, With<Mesh3d>>,
     mut gizmos: Gizmos,
     draw_state: Res<DrawState>,
 ) {
@@ -532,16 +504,17 @@ pub fn draw(
         GHOST_WHITE
         );
 
+    particles.iter().zip(balls.iter_mut()).for_each(|(p, mut t)| {
+        t.translation = Vec3::from(p.x);
+        //gizmos.sphere(p.x, 0.05, BLUE_500);
+    });
+
     if draw_state.0 == false {
         return;
     }
 
     println!("{}", particles.len());
 
-    particles.iter().for_each(|p| {
-        //t.translation = Vec3::from(p.x);
-        gizmos.sphere(p.x, 0.05, BLUE_500);
-    });
     for i in 0..(sim_max_pos / Chunk::CHUNK_SIZE) + 1 {
         for j in 0..(sim_max_pos / Chunk::CHUNK_SIZE) + 1 {
             for k in 0..(sim_max_pos / Chunk::CHUNK_SIZE) + 1 {

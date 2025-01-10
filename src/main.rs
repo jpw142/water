@@ -58,7 +58,6 @@ fn toggle_systems(
 }
 
 // TODO:
-// Fix G2P Boundary Conditions for Particles
 // See if storing results in temporary array and then locking each mutex once is effective
 // (Create hashmap with what chunk each node belongs to and then just go down each list and only
 // lock 1 mutex at a time) a flat array could also probably work that just converts between (0..=2,
