@@ -36,6 +36,7 @@ fn main() {
         .insert_resource(Time::<Fixed>::from_seconds(0.05))
         .insert_resource(SpawnBuffer(Mutex::new(vec![])))
         .insert_resource(DespawnBuffer(Mutex::new(vec![])))
+        .insert_resource(Particles(vec![]))
         .add_systems(Startup, (initialize, clear_grid, p2g1, p2g2, update_grid, g2p))
         .add_systems(FixedUpdate, (clear_grid, p2g1, p2g2, update_grid, g2p, spawn).chain())
         .add_systems(Update, (draw, toggle_systems).chain())

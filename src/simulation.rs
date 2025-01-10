@@ -1,5 +1,7 @@
 #![allow(non_upper_case_globals)]
 
+use std::ops::{Deref, DerefMut};
+
 use rayon::prelude::*;
 use crate::{DrawState, SpawnState, SpawnBuffer, DespawnBuffer};
 use bevy::{prelude::*, gizmos::gizmos, color::palettes::{tailwind::{RED_500, BLUE_500, ORANGE_500, LIME_500, GRAY_500}, css::GHOST_WHITE}, math::{Vec3A, Mat3A}};
@@ -16,6 +18,22 @@ const eos_stiffness: f32 = 10.0;
 const eos_power: f32 = 4.;
 
 const sim_max_pos: usize = 64;
+
+#[derive(Resource)]
+pub struct Particles (pub Vec<Particle>);
+
+impl Deref for Particles {
+    type Target = Vec<Particle>;
+    fn deref(&self) -> &Self::Target {
+        return &self.0;
+    }
+}
+
+impl DerefMut for Particles {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        return &mut self.0;    
+    }
+}
 
 
 /// Langrangian Particle
@@ -52,7 +70,7 @@ impl Node {
 
 
 /// Sets all nodes in the grid to 0
-pub fn clear_grid ( mut grid: ResMut<Grid> ) {
+pub fn clear_grid (grid: ResMut<Grid> ) {
     grid.0.iter().par_bridge().for_each(|(_, c)| {
         let mut chunk = c.lock();
         chunk.iter_mut().for_each(|node| {
@@ -63,9 +81,10 @@ pub fn clear_grid ( mut grid: ResMut<Grid> ) {
 
 pub fn p2g1 (
     grid: ResMut<Grid>,
-    query: Query<&Particle>,
+    mut particles: ResMut<Particles>,
+    //query: Query<&Particle>,
     ) {
-    query.par_iter().for_each(|p| {
+    particles.par_iter().for_each(|p| {
         let n = p.x.trunc(); // Truncates decimal part of float, leaving integer part
         let dx = p.x.fract() - 0.5; // How far away the particle is away from the node
 
@@ -118,9 +137,10 @@ pub fn p2g1 (
 
 pub fn p2g2 (
     grid: ResMut<Grid>,
-    query: Query<&Particle>,
+    mut particles: ResMut<Particles>,
+    //query: Query<&Particle>,
     ) {
-    query.par_iter().for_each(|p| {
+    particles.par_iter().for_each(|p| {
         let n = p.x.trunc(); // Truncates decimal part of float, leaving integer part
         let dx = p.x.fract() - 0.5; // How far away the particle is away from the node
 
@@ -274,10 +294,11 @@ pub fn update_grid (
 
 pub fn g2p (
     grid: Res<Grid>,
-    mut particles: Query<(Entity, &mut Particle)>,
+    mut particles: ResMut<Particles>,
+    //mut particles: Query<(Entity, &mut Particle)>,
     despawn_buf: Res<DespawnBuffer>,
 ) {
-   particles.par_iter_mut().for_each(|(e, mut p)| {
+   particles.par_iter_mut().for_each(|(/*e,*/ mut p)| {
         p.v = Vec3A::ZERO;
 
         let n = p.x.trunc(); // Truncates decimal part of float, leaving integer part
@@ -313,11 +334,13 @@ pub fn g2p (
                     // Get the edge_mask for free while locking the first time
                     if i == 0 && j == 0 && k == 0 {
                         edge_mask = chunk.edge_mask;
+                        /*
                         if chunk[n_index].p.max(1) % p.p as u32 == 0 {
                             let mut dsb = despawn_buf.0.lock().unwrap();
                             dsb.push(e);
                             chunk[n_index].p /= p.p as u32;
                         }
+                        */
                     }
 
                     std::mem::drop(chunk); // Unlock Mutex
@@ -351,10 +374,10 @@ pub fn g2p (
 }
 
 pub fn initialize(
-    mut commands: Commands,
+    // mut commands: Commands,
     mut grid: ResMut<Grid>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    // mut meshes: ResMut<Assets<Mesh>>,
+    // mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     for i in 0..sim_max_pos / Chunk::CHUNK_SIZE {
         for j in 0..sim_max_pos / Chunk::CHUNK_SIZE { 
@@ -364,12 +387,12 @@ pub fn initialize(
         }
     }
 
-    let blue_material = materials.add(StandardMaterial{
-        base_color: BLUE_500.into(),
-        unlit: true,
-        ..Default::default()
-    });
-    let sphere_mesh = meshes.add(Sphere::new(0.2).mesh().ico(1).unwrap());
+    //let blue_material = materials.add(StandardMaterial{
+    //    base_color: BLUE_500.into(),
+    //    unlit: true,
+    //    ..Default::default()
+    //});
+    //let sphere_mesh = meshes.add(Sphere::new(0.2).mesh().ico(1).unwrap());
 
 
    // for x in 15..50 {
@@ -399,6 +422,7 @@ pub fn spawn(
     spawn_buf: Res<SpawnBuffer>,
     despawn_buf: Res<DespawnBuffer>,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut particles: ResMut<Particles>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     ) {
     // Meshes for '5' particles
@@ -434,31 +458,47 @@ pub fn spawn(
         return;
     }
 
-    let blue_material = materials.add(StandardMaterial{
-        base_color: BLUE_500.into(),
-        unlit: true,
-        ..Default::default()
-    });
-    let sphere_mesh = meshes.add(Sphere::new(0.2).mesh().ico(0).unwrap());
-
-
+    let mut temp_vec = vec![];
     for x in 50..55 {
         for y in 50..55 {
             let pos = Vec3A::new(x as f32, y as f32, 5.);
-            commands.spawn((
-                    Particle {
-                        x: pos,
-                        v: Vec3A::new(0., 0., 2.),
-                        c: Mat3A::ZERO,
-                        p: 2,
-                        m: 1.
-                    },
-                    Mesh3d(sphere_mesh.clone()),
-                    MeshMaterial3d(blue_material.clone()),
-                    Transform{translation: Vec3::from(pos), ..Default::default()},
-                    ));
+            temp_vec.push( Particle {
+                x: pos,
+                v: Vec3A::new(0., 0., 2.),
+                c: Mat3A::ZERO,
+                p: 2,
+                m: 1.,
+            });
+        
         }
     }
+    particles.append(&mut temp_vec);
+
+    //let blue_material = materials.add(StandardMaterial{
+    //    base_color: BLUE_500.into(),
+    //    unlit: true,
+    //    ..Default::default()
+    //});
+    //let sphere_mesh = meshes.add(Sphere::new(0.2).mesh().ico(0).unwrap());
+
+
+    //for x in 50..55 {
+    //    for y in 50..55 {
+    //        let pos = Vec3A::new(x as f32, y as f32, 5.);
+    //        commands.spawn((
+    //                Particle {
+    //                    x: pos,
+    //                    v: Vec3A::new(0., 0., 2.),
+    //                    c: Mat3A::ZERO,
+    //                    p: 2,
+    //                    m: 1.
+    //                },
+    //                Mesh3d(sphere_mesh.clone()),
+    //                MeshMaterial3d(blue_material.clone()),
+    //                Transform{translation: Vec3::from(pos), ..Default::default()},
+    //                ));
+    //    }
+    //}
 
    // let orange_material = materials.add(StandardMaterial{
    //     base_color: ORANGE_500.into(),
@@ -482,21 +522,26 @@ pub fn spawn(
 }
 
 pub fn draw(
-    mut particles: Query<(&mut Particle, &mut Transform)>,
+    //mut particles: Query<(&mut Particle, &mut Transform)>,
+    particles: ResMut<Particles>,
     mut gizmos: Gizmos,
     draw_state: Res<DrawState>,
 ) {
-    particles.iter_mut().for_each(|(p, mut t)| {
-        t.translation = Vec3::from(p.x);
-    });
-
-    if draw_state.0 == false {
-        return;
-    }
     gizmos.cuboid( 
         Transform::from_translation(Vec3::from((sim_max_pos as f32 / 2., sim_max_pos as f32 / 2., sim_max_pos as f32 / 2.))).with_scale(Vec3::splat(sim_max_pos as f32)),
         GHOST_WHITE
         );
+
+    if draw_state.0 == false {
+        return;
+    }
+
+    println!("{}", particles.len());
+
+    particles.iter().for_each(|p| {
+        //t.translation = Vec3::from(p.x);
+        gizmos.sphere(p.x, 0.05, BLUE_500);
+    });
     for i in 0..(sim_max_pos / Chunk::CHUNK_SIZE) + 1 {
         for j in 0..(sim_max_pos / Chunk::CHUNK_SIZE) + 1 {
             for k in 0..(sim_max_pos / Chunk::CHUNK_SIZE) + 1 {
