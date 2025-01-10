@@ -477,7 +477,7 @@ pub fn spawn(
             });
             commands.spawn((
                     Mesh3d(sphere_mesh.clone()),
-                    MeshMaterial3d(green_material.clone()),
+                    MeshMaterial3d(blue_material.clone()),
                     Transform{translation: pos.into(), ..Default::default()},
                     ));
 
