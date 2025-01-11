@@ -3,7 +3,6 @@ mod simulation;
 
 use crate::grid::*;
 use crate::simulation::*;
-use crate::simulation::Node;
 use bevy::utils::hashbrown::HashMap;
 use bevy::prelude::*;
 use std::sync::Mutex;
@@ -27,7 +26,6 @@ pub struct DespawnBuffer(Mutex<Vec<usize>>);
 
 
 fn main() {
-    println!("{}", size_of::<Node>());
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(FrameTimeDiagnosticsPlugin::default())

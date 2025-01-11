@@ -5,6 +5,19 @@ use crate::simulation::Node;
 use bevy::utils::hashbrown::HashMap;
 use bevy::prelude::*;
 
+// TODO:
+// Next major change is going to be transforming from AoS to SoA for better cache efficieny
+// This is to see if the cache hits are more of a bottleneck than locking the grid mutex a second time
+// If Cache miss time > (mutex lock * 2) + {constant index calculation}
+// Then this will be beneficial and my thesis is that it will be significantly better for
+// update_grid, slightly better for clear_grid, and slightly better for p2g1 and p2g2 and g2p
+// because I beleive mutexes are lowly contested enough where mutex lock * 2 is less than cache
+// miss
+//
+// Also might as well try Morton Encoding next to see if that improves the cache efficiency for
+// p2g1 p2g2 && g2p
+
+
 ///
 /// A chunk is an N x N x N block of eulerian nodes that make up a larger fluid simulation space
 /// N = Chunk_Size
