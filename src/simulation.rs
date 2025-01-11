@@ -5,8 +5,6 @@ use std::ops::{Deref, DerefMut};
 use rayon::prelude::*;
 use crate::{DrawState, SpawnState, SpawnBuffer, DespawnBuffer};
 use bevy::{prelude::*, gizmos::gizmos, color::palettes::{tailwind::{RED_500, BLUE_500, ORANGE_500, LIME_500, GRAY_500}, css::GHOST_WHITE}, math::{Vec3A, Mat3A}};
-use bevy::utils::hashbrown::HashMap;
-use bevy::log::*;
 
 use crate::grid::*;
 
@@ -37,7 +35,7 @@ impl DerefMut for Particles {
 
 
 /// Langrangian Particle
-#[derive(Component, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct Particle {
     x: Vec3A,    // Position
     v: Vec3A,    // Velocity
@@ -62,7 +60,7 @@ impl Default for Node {
 
 impl Node {
     fn zero(&mut self) {
-        self.p = 1;
+        //self.p = 1;
         self.m = 0.0;
         self.v = Vec3A::ZERO;
     }
@@ -99,9 +97,9 @@ pub fn p2g1 (
         //let mut node_buffer: HashMap<IVec3, Vec<(usize, f32, Vec3A)>> = HashMap::new();
 
         let results : [(IVec3, usize, f32, Vec3A); 27] = core::array::from_fn(|index| {
-            let i = index / 9;
+            let k = index / 9;
             let j = (index % 9) / 3; 
-            let k = index % 3;
+            let i = index % 3;
 
             let weight = w[i].x * w[j].y * w[k].z;
 
@@ -120,6 +118,7 @@ pub fn p2g1 (
             (chunk_pos, node_index, mass_contribution, velocity_contribution)
         });
 
+
         let mut current_chunk = results[0].0;
         let mut chunk_lock = grid.get(&current_chunk).expect("Particle out of bounds p2g1").lock();
 
@@ -137,8 +136,7 @@ pub fn p2g1 (
 
 pub fn p2g2 (
     grid: ResMut<Grid>,
-    mut particles: ResMut<Particles>,
-    //query: Query<&Particle>,
+    particles: ResMut<Particles>,
     ) {
     particles.par_iter().for_each(|p| {
         let n = p.x.trunc(); // Truncates decimal part of float, leaving integer part
@@ -169,7 +167,7 @@ pub fn p2g2 (
                     let n_index = Chunk::node_world_pos_to_index(icurr_x);
                    // TODO: Could be improved by pre-fetching masses
                     //
-                    let mut chunk = grid.get(&chunk_index).expect("Particle somehow out of bounds of loaded chunks").lock();
+                    let chunk = grid.get(&chunk_index).expect("Particle somehow out of bounds of loaded chunks").lock();
 
                     // Do work inside mutex
                     density += chunk[n_index].m * weight;
@@ -295,10 +293,9 @@ pub fn update_grid (
 pub fn g2p (
     grid: Res<Grid>,
     mut particles: ResMut<Particles>,
-    //mut particles: Query<(Entity, &mut Particle)>,
     despawn_buf: Res<DespawnBuffer>,
 ) {
-   particles.par_iter_mut().for_each(|(/*e,*/ mut p)| {
+   particles.par_iter_mut().enumerate().for_each(|(p_index, p)| {
         p.v = Vec3A::ZERO;
 
         let n = p.x.trunc(); // Truncates decimal part of float, leaving integer part
@@ -311,7 +308,7 @@ pub fn g2p (
         ];
 
         let mut b = Mat3A::ZERO;
-        let mut edge_mask = 0; 
+        //let mut edge_mask = 0; 
         for i in 0..3 {
             for j in 0..3 {
                 for k in 0..3 {
@@ -333,14 +330,12 @@ pub fn g2p (
                     
                     // Get the edge_mask for free while locking the first time
                     if i == 0 && j == 0 && k == 0 {
-                        edge_mask = chunk.edge_mask;
-                        /*
+                        //edge_mask = chunk.edge_mask;
                         if chunk[n_index].p.max(1) % p.p as u32 == 0 {
                             let mut dsb = despawn_buf.0.lock().unwrap();
-                            dsb.push(e);
+                            dsb.push(p_index);
                             chunk[n_index].p /= p.p as u32;
                         }
-                        */
                     }
 
                     std::mem::drop(chunk); // Unlock Mutex
@@ -356,7 +351,7 @@ pub fn g2p (
 
         let end = (sim_max_pos - (Chunk::EDGE_BUFFER_SIZE)) as f32;
 
-        let local_pos = Chunk::index_to_node_local_pos(Chunk::node_world_pos_to_index(n.as_ivec3()));
+        //let local_pos = Chunk::index_to_node_local_pos(Chunk::node_world_pos_to_index(n.as_ivec3()));
 
         let x_n = p.x + p.v;
 
@@ -386,34 +381,6 @@ pub fn initialize(
             }
         }
     }
-
-    //let blue_material = materials.add(StandardMaterial{
-    //    base_color: BLUE_500.into(),
-    //    unlit: true,
-    //    ..Default::default()
-    //});
-    //let sphere_mesh = meshes.add(Sphere::new(0.2).mesh().ico(1).unwrap());
-
-
-   // for x in 15..50 {
-   //     for y in 15..50{
-   //         for z in 15..50 {
-   //             let pos = Vec3::new(x as f32, y as f32, z as f32);
-   //             commands.spawn((
-   //                 Particle {
-   //                     x: pos,
-   //                     v: Vec3::ZERO,
-   //                     c: Mat3::ZERO,
-   //                     p: 2,
-   //                     m: 1.
-   //                 },
-   //                 Mesh3d(sphere_mesh.clone()),
-   //                 MeshMaterial3d(blue_material.clone()),
-   //                 Transform{translation: pos, ..Default::default()},
-   //             ));
-   //         }
-   //     }
-   // }
 }
 
 pub fn spawn(
@@ -428,7 +395,7 @@ pub fn spawn(
     // Meshes for particles
     let sphere_mesh = meshes.add(Sphere::new(0.2).mesh().ico(0).unwrap());
 
-    // Material COlors
+    // Material Colors
     let green_material = materials.add(StandardMaterial{
         base_color: LIME_500.into(),
         unlit: true,
@@ -440,23 +407,29 @@ pub fn spawn(
         ..Default::default()
     });
 
-    // Spawn any particles due to be spawned
+    // Spawn any particles due to be spawned because of material combinations
     let mut sb = spawn_buf.0.lock().unwrap();
+    
+    // Adds all particles to simulation backend
+    particles.append(&mut sb.clone());
 
+    // Still need to spawn their mesh representations and then we can get rid of them
     for p in sb.drain(..) {
         // Change to spawn_batch
-        commands.spawn((
-                Mesh3d(sphere_mesh.clone()),
-                MeshMaterial3d(blue_material.clone()),
-                Transform{translation: Vec3::from(p.x.clone()) , ..Default::default()},
-                ));
+        if p.p == 5 {
+            commands.spawn((
+                    Mesh3d(sphere_mesh.clone()),
+                    MeshMaterial3d(green_material.clone()),
+                    Transform{translation: p.x.into() , ..Default::default()},
+                    ));
+        }
     }
     drop(sb);
 
     // Despawn any particles due to be despawned
     let mut dsb = despawn_buf.0.lock().unwrap();
-    for e in dsb.drain(..) {
-        commands.entity(e).despawn();
+    for p_index in dsb.drain(..) {
+        particles.swap_remove(p_index);
     }
     drop(dsb);
 
@@ -506,7 +479,6 @@ pub fn draw(
 
     particles.iter().zip(balls.iter_mut()).for_each(|(p, mut t)| {
         t.translation = Vec3::from(p.x);
-        //gizmos.sphere(p.x, 0.05, BLUE_500);
     });
 
     if draw_state.0 == false {

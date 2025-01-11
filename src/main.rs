@@ -3,6 +3,7 @@ mod simulation;
 
 use crate::grid::*;
 use crate::simulation::*;
+use crate::simulation::Node;
 use bevy::utils::hashbrown::HashMap;
 use bevy::prelude::*;
 use std::sync::Mutex;
@@ -22,10 +23,11 @@ pub struct SpawnState(bool);
 pub struct SpawnBuffer(Mutex<Vec<Particle>>);
 
 #[derive(Resource)]
-pub struct DespawnBuffer(Mutex<Vec<Entity>>);
+pub struct DespawnBuffer(Mutex<Vec<usize>>);
 
 
 fn main() {
+    println!("{}", size_of::<Node>());
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
