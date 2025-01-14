@@ -118,6 +118,57 @@ impl Chunk {
         UVec3::new(x as u32, y as u32, z as u32)
     }
 
+    ///
+    /// Input:
+    /// Index of center node
+    ///
+    /// Output:
+    /// An array from (-1, -1, -1) -> (1, 1, 1) centered around the center node
+    ///
+    /// Gives an array of neighboring indicies 
+    /// Doesnt convert between index space and geometric space allowing for efficient translation
+    /// Ordered x then y then z
+    /// Follows this formula but more efficiently
+    /// z as usize * Chunk::CHUNK_SIZE * Chunk::CHUNK_SIZE + y as usize * Chunk::CHUNK_SIZE + x as usize
+    pub fn neighbor_indices(i: u16) -> [u16; 27] {
+        assert!(Chunk::CHUNK_SIZE == 4);
+
+        // +-x = (i +- 1) % 4 + ((i >> 2) << 2)    
+        //let plus_x = (i + 1) % 4 + ((i / 4) * 4);
+        //let minus_x = (i - 1) % 4 + ((i / 4) * 4);
+        let plus_x = (i + 1) & 3 | (i & !3);
+        let minus_x = (i + 3) & 3 | (i & !3);
+
+        // +-y = (i +- 4) % 16 + ((i >> 4) << 4)
+        // let plus_y = (i + 4) % 16 + ((i / 16) * 16);
+        // let minus_y = (i - 4) % 16 + ((i / 16) * 16);
+        let plus_y = (i + 4) & 15 | (i & !15);
+        let minus_y = (i + 12) % 16 | (i & !15);
+
+        // +-z = (i +- 16) % 64 + ((i >> 6) << 6) 
+        //let plus_z = (i + 16) % 64;
+        //let minus_z = (i - 16) % 64;
+
+        let plusx_plusy = (plus_y + 1) & 3 | (plus_y & !3);
+        let plusx_miny = (minus_y + 1) & 3 | (minus_y & !3);
+        let minx_plusy = (plus_y + 3) & 3 | (plus_y & !3);
+        let minx_miny = (minus_y + 3) & 3 | (minus_y & !3);
+
+        [
+            ((minx_miny + 48) & 63),  (minus_y + 48) & 63,    (plusx_miny + 48) & 63,
+            (minus_x + 48) & 63,    (i + 48) & 63,          (plus_x + 48) & 63,
+            (minx_plusy + 48) & 63, (plus_y + 48) & 63,     (plusx_plusy + 48) & 63,
+
+            minx_miny,              minus_y,                plusx_miny,
+            minus_x,                i,                      plus_x,
+            minx_plusy,             plus_y,                 plusx_plusy,
+
+            (minx_miny + 16) & 63,  (minus_y + 16) & 63,    (plusx_miny + 16) & 63,
+            (minus_x + 16) & 63,    (i + 16) & 63,          (plus_x + 16) & 63,
+            (minx_plusy + 16) & 63, (plus_y + 16) & 63,     (plusx_plusy + 16) & 63
+        ]
+    }
+
     pub fn new(edge_mask: u8) -> Self {
         Chunk{
             g: [Node::default(); Chunk::CHUNK_SIZE * Chunk::CHUNK_SIZE * Chunk::CHUNK_SIZE],
@@ -300,5 +351,26 @@ mod tests {
         assert!(chunk4.edge_mask == 0b101111);
         assert!(chunk5.edge_mask == 0b11111);
         assert!(chunk6.edge_mask == 0b110111);
+    }
+
+    #[test]
+    fn neighbor_test() {
+        for i in 0..64 {
+            let neighbors = Chunk::neighbor_indices(i);
+
+            let curr_node = Chunk::index_to_node_local_pos(i as usize).as_ivec3();
+
+            let mut index = 0;
+            for k in 0..3 {
+                for j in 0..3 {
+                    for i in 0..3 {
+                        let curr_x = curr_node + IVec3::new(i, j, k) - IVec3::ONE;
+                        assert!( Chunk::node_world_pos_to_index(curr_x) == neighbors[index as usize] as usize );
+                        index += 1;
+                    }
+                }
+            }
+
+        }
     }
 }

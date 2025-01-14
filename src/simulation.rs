@@ -4,8 +4,12 @@ use std::ops::{Deref, DerefMut};
 
 use rayon::prelude::*;
 use crate::{DrawState, SpawnState, SpawnBuffer, DespawnBuffer};
-use bevy::{prelude::*, gizmos::gizmos, color::palettes::{tailwind::{RED_500, BLUE_500, ORANGE_500, LIME_500, GRAY_500}, css::GHOST_WHITE}, math::{Vec3A, Mat3A}};
-
+use bevy::{
+    prelude::*, 
+    gizmos::gizmos, 
+    color::palettes::{tailwind::{RED_500, BLUE_500, ORANGE_500, LIME_500, GRAY_500}, css::GHOST_WHITE}, 
+    math::{Vec3A, Mat3A}
+};
 use crate::grid::*;
 
 const dt: f32 = 0.2;
@@ -79,7 +83,7 @@ pub fn clear_grid (grid: ResMut<Grid> ) {
 
 pub fn p2g1 (
     grid: ResMut<Grid>,
-    mut particles: ResMut<Particles>,
+    particles: ResMut<Particles>,
     //query: Query<&Particle>,
     ) {
     particles.par_iter().for_each(|p| {
@@ -96,7 +100,7 @@ pub fn p2g1 (
         // Buffer to store new node informatio nin to avoid locking mutex 27 times
         //let mut node_buffer: HashMap<IVec3, Vec<(usize, f32, Vec3A)>> = HashMap::new();
 
-        let results : [(IVec3, usize, f32, Vec3A); 27] = core::array::from_fn(|index| {
+        let results : [(IVec3, /*usize,*/ f32, Vec3A); 27] = core::array::from_fn(|index| {
             let k = index / 9;
             let j = (index % 9) / 3; 
             let i = index % 3;
@@ -113,23 +117,25 @@ pub fn p2g1 (
             let velocity_contribution = mass_contribution * (p.v + Vec3A::from(q));
 
             let chunk_pos = Chunk::node_world_pos_to_chunk_pos(curr_x.as_ivec3()); 
-            let node_index = Chunk::node_world_pos_to_index(curr_x.as_ivec3());
+            // let node_index = Chunk::node_world_pos_to_index(curr_x.as_ivec3());
 
-            (chunk_pos, node_index, mass_contribution, velocity_contribution)
+            (chunk_pos, /*node_index,*/ mass_contribution, velocity_contribution)
         });
 
+        let center_index = Chunk::node_world_pos_to_index(n.as_ivec3());
+        let neighbor_indices = Chunk::neighbor_indices(center_index as u16);
 
         let mut current_chunk = results[0].0;
         let mut chunk_lock = grid.get(&current_chunk).expect("Particle out of bounds p2g1").lock();
 
-        for (chunk, index, mass, velocity) in results {
+        for (&(chunk, /*index,*/ mass, velocity), &index) in results.iter().zip(neighbor_indices.iter()) {
             if chunk != current_chunk {
                 drop(chunk_lock);
                 chunk_lock = grid.get(&chunk).expect("Particle out of bounds p2g1").lock();
                 current_chunk = chunk;
             }
-            chunk_lock[index].m += mass;
-            chunk_lock[index].v += velocity;
+            chunk_lock[index as usize].m += mass;
+            chunk_lock[index as usize].v += velocity;
         }
     });
 }

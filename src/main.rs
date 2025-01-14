@@ -62,3 +62,5 @@ fn toggle_systems(
 // (Create hashmap with what chunk each node belongs to and then just go down each list and only
 // lock 1 mutex at a time) a flat array could also probably work that just converts between (0..=2,
 // ....) to flat coordinates or something similiar
+// 
+// It is faster
