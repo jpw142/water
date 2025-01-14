@@ -8,7 +8,8 @@ use bevy::{
     prelude::*, 
     gizmos::gizmos, 
     color::palettes::{tailwind::{RED_500, BLUE_500, ORANGE_500, LIME_500, GRAY_500}, css::GHOST_WHITE}, 
-    math::{Vec3A, Mat3A}
+    math::{Vec3A, Mat3A},
+    utils::hashbrown::HashMap,
 };
 use crate::grid::*;
 
@@ -95,7 +96,7 @@ pub fn p2g1 (
             0.5 * (0.5 + dx).powf(2.),
         ];
 
-        let results : [(f32, Vec3A); 27] = core::array::from_fn(|index| {
+        let mut results : [(f32, Vec3A); 27] = core::array::from_fn(|index| {
             let k = index / 9;
             let j = (index % 9) / 3; 
             let i = index % 3;
@@ -118,18 +119,45 @@ pub fn p2g1 (
         let neighbor_indices = Chunk::neighbor_indices(center_index as u16);
     
         let mut current_chunk = Chunk::node_world_pos_to_chunk_pos(n.as_ivec3());
+        let mut next_chunk = current_chunk;
         let neighbor_chunks = Chunk::neighbor_chunks(current_chunk, center_index as u8);
+            
+        // Hashmap is too slow
+        // let mut hashmap = HashMap::new();
+
+        let mut mask = [false; 27];
+        
 
         let mut chunk_lock = grid.get(&current_chunk).expect("Particle out of bounds p2g1").lock();
 
-        for ((&(mass, velocity), &index), &chunk) in results.iter().zip(neighbor_indices.iter()).zip(neighbor_chunks.iter()) {
-            if chunk != current_chunk {
-                drop(chunk_lock);
-                chunk_lock = grid.get(&chunk).expect("Particle out of bounds p2g1").lock();
-                current_chunk = chunk;
+        // Could get rid of a significant amount of mutexes by only ever locking it once
+        // Instead of using a hashmap use 2 arrays and transfer the stragglers to the other array
+        
+        let mut count = 0;
+        'outer: for _ in 0..8 {
+            for i in 0..27 {
+                if mask[i] {
+                    if count == 27 {
+                        drop(chunk_lock);
+                        break 'outer;
+                    }
+                    continue;
+                }
+                if neighbor_chunks[i] != current_chunk {
+                    next_chunk = neighbor_chunks[i];
+                    continue
+                }
+                chunk_lock[neighbor_indices[i] as usize].m += results[i].0;
+                chunk_lock[neighbor_indices[i] as usize].v += results[i].1;
+                mask[i] = true;
+                count += 1;
             }
-            chunk_lock[index as usize].m += mass;
-            chunk_lock[index as usize].v += velocity;
+            drop(chunk_lock);
+            if current_chunk == next_chunk {
+                break;
+            }
+            current_chunk = next_chunk;
+            chunk_lock = grid.get(&next_chunk).expect("Particle out of bounds p2g1").lock();
         }
     });
 }
@@ -372,7 +400,6 @@ pub fn g2p (
 
         let v = p.v;
         p.x += v * dt; 
-        // println!("{}", p.x);
     })
 }
 
@@ -411,7 +438,7 @@ pub fn spawn(
     });
     let blue_material = materials.add(StandardMaterial{
         base_color: BLUE_500.into(),
-        unlit: false,
+        unlit: true,
         ..Default::default()
     });
 
