@@ -119,21 +119,15 @@ pub fn p2g1 (
         let neighbor_indices = Chunk::neighbor_indices(center_index as u16);
     
         let mut current_chunk = Chunk::node_world_pos_to_chunk_pos(n.as_ivec3());
-        let mut next_chunk = current_chunk;
         let neighbor_chunks = Chunk::neighbor_chunks(current_chunk, center_index as u8);
             
-        // Hashmap is too slow
-        // let mut hashmap = HashMap::new();
-
+        let mut next_chunk = current_chunk;
         let mut mask = [false; 27];
-        
+        let mut count = 0;
 
         let mut chunk_lock = grid.get(&current_chunk).expect("Particle out of bounds p2g1").lock();
-
-        // Could get rid of a significant amount of mutexes by only ever locking it once
-        // Instead of using a hashmap use 2 arrays and transfer the stragglers to the other array
         
-        let mut count = 0;
+        // Write the data to chunks while locking mutexes fewest times possible
         'outer: for _ in 0..8 {
             for i in 0..27 {
                 if mask[i] {
@@ -182,19 +176,40 @@ pub fn p2g2 (
         let mut current_chunk = Chunk::node_world_pos_to_chunk_pos(n.as_ivec3());
         let neighbor_chunks = Chunk::neighbor_chunks(current_chunk, center_index as u8);
 
-        let mut chunk_lock = grid.get(&current_chunk).expect("Particle out of bounds p2g1").lock();
-
         let mut masses: [f32; 27] = [0.; 27];
 
-        for ((node_index, &index), &chunk) in neighbor_indices.iter().enumerate().zip(neighbor_chunks.iter()) {
-            if chunk != current_chunk {
-                drop(chunk_lock);
-                chunk_lock = grid.get(&chunk).expect("Particle out of bounds p2g1").lock();
-                current_chunk = chunk;
+
+        let mut next_chunk = current_chunk;
+        let mut mask = [false; 27];
+        let mut count = 0;
+
+        let mut chunk_lock = grid.get(&current_chunk).expect("Particle out of bounds p2g1").lock();
+        
+        // Write the data to chunks while locking mutexes fewest times possible
+        'outer: for _ in 0..8 {
+            for i in 0..27 {
+                if mask[i] {
+                    if count == 27 {
+                        drop(chunk_lock);
+                        break 'outer;
+                    }
+                    continue;
+                }
+                if neighbor_chunks[i] != current_chunk {
+                    next_chunk = neighbor_chunks[i];
+                    continue
+                }
+                masses[i] = chunk_lock[neighbor_indices[i] as usize].m;
+                mask[i] = true;
+                count += 1;
             }
-            masses[node_index] = chunk_lock[index as usize].m;
+            drop(chunk_lock);
+            if current_chunk == next_chunk {
+                break;
+            }
+            current_chunk = next_chunk;
+            chunk_lock = grid.get(&next_chunk).expect("Particle out of bounds p2g1").lock();
         }
-        drop(chunk_lock);
 
         let density: f32 = masses.iter().enumerate().fold(0.0_f32, |density, (index, m)| {
             let k = index / 9;
@@ -245,12 +260,39 @@ pub fn p2g2 (
         let mut current_chunk = Chunk::node_world_pos_to_chunk_pos(n.as_ivec3());
         let neighbor_chunks = Chunk::neighbor_chunks(current_chunk, center_index as u8);
 
+        //let mut next_chunk = current_chunk;
+        //let mut mask = [false; 27];
+        //let mut count = 0;
+
         let mut chunk_lock = grid.get(&current_chunk).expect("Particle out of bounds p2g1").lock();
-
-
-        //if i == 0 && j == 0 && k == 0 { chunk[n_index].p *= p.p as u32; }
+        
         chunk_lock[neighbor_indices[13] as usize].p *= p.p as u32;
 
+        // I don't know why this is slower than the default implementation 
+        //'outer: for _ in 0..8 {
+        //    for i in 0..27 {
+        //        if mask[i] {
+        //            if count == 27 {
+        //                drop(chunk_lock);
+        //                break 'outer;
+        //            }
+        //            continue;
+        //        }
+        //        if neighbor_chunks[i] != current_chunk {
+        //            next_chunk = neighbor_chunks[i];
+        //            continue
+        //        }
+        //        chunk_lock[neighbor_indices[i] as usize].v += results[i];
+        //        mask[i] = true;
+        //        count += 1;
+        //    }
+        //    drop(chunk_lock);
+        //    if current_chunk == next_chunk {
+        //        break;
+        //    }
+        //    current_chunk = next_chunk;
+        //    chunk_lock = grid.get(&next_chunk).expect("Particle out of bounds p2g1").lock();
+        //}
         for ((&momentum, &index), &chunk) in results.iter().zip(neighbor_indices.iter()).zip(neighbor_chunks.iter()) {
             if chunk != current_chunk {
                 drop(chunk_lock);
@@ -347,6 +389,12 @@ pub fn g2p (
         let mut current_chunk = Chunk::node_world_pos_to_chunk_pos(n.as_ivec3());
         let neighbor_chunks = Chunk::neighbor_chunks(current_chunk, center_index as u8);
 
+        let mut velocities: [Vec3A; 27] = [Vec3A::ZERO; 27];
+
+        let mut next_chunk = current_chunk;
+        let mut mask = [false; 27];
+        let mut count = 0;
+
         let mut chunk_lock = grid.get(&current_chunk).expect("Particle out of bounds p2g1").lock();
 
         if chunk_lock[neighbor_indices[13] as usize].p.max(1) % p.p as u32 == 0 {
@@ -355,17 +403,31 @@ pub fn g2p (
             chunk_lock[neighbor_indices[13] as usize].p /= p.p as u32;
         }
 
-        let mut velocities: [Vec3A; 27] = [Vec3A::ZERO; 27];
-
-        for ((node_index, &index), &chunk) in neighbor_indices.iter().enumerate().zip(neighbor_chunks.iter()) {
-            if chunk != current_chunk {
-                drop(chunk_lock);
-                chunk_lock = grid.get(&chunk).expect("Particle out of bounds p2g1").lock();
-                current_chunk = chunk;
+        // Write the data to chunks while locking mutexes fewest times possible
+        'outer: for _ in 0..8 {
+            for i in 0..27 {
+                if mask[i] {
+                    if count == 27 {
+                        drop(chunk_lock);
+                        break 'outer;
+                    }
+                    continue;
+                }
+                if neighbor_chunks[i] != current_chunk {
+                    next_chunk = neighbor_chunks[i];
+                    continue
+                }
+                velocities[i] = chunk_lock[neighbor_indices[i] as usize].v;
+                mask[i] = true;
+                count += 1;
             }
-            velocities[node_index] = chunk_lock[index as usize].v;
+            drop(chunk_lock);
+            if current_chunk == next_chunk {
+                break;
+            }
+            current_chunk = next_chunk;
+            chunk_lock = grid.get(&next_chunk).expect("Particle out of bounds p2g1").lock();
         }
-        drop(chunk_lock);
 
         p.v += velocities.iter().enumerate().fold(Vec3A::ZERO, |velocity, (index, v)| {
             let k = index / 9;
