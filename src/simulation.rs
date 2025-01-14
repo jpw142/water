@@ -312,44 +312,49 @@ pub fn g2p (
 
         let mut b = Mat3A::ZERO;
         //let mut edge_mask = 0; 
-        for i in 0..3 {
-            for j in 0..3 {
-                for k in 0..3 {
-                    let weight = w[i].x * w[j].y * w[k].z; // Quadratic B-Spline  
-                    let curr_x = Vec3A::from([
-                        n.x + (i as f32) - 1.,
-                        n.y + (j as f32) - 1.,
-                        n.z + (k as f32) - 1.,
-                    ]);
-                    let icurr_x = curr_x.as_ivec3();
-                    let curr_dx = (curr_x - p.x) + 0.5; // p distance to current n
-                    // Get Mutex
-                    let chunk_index = Chunk::node_world_pos_to_chunk_pos(icurr_x); 
-                    let n_index = Chunk::node_world_pos_to_index(icurr_x);
-                    let mut chunk = grid.get(&chunk_index).expect("Particle somehow out of bounds of loaded chunks").lock();
+        //
+        let center_index = Chunk::node_world_pos_to_index(n.as_ivec3());
+        let neighbor_indices = Chunk::neighbor_indices(center_index as u16);
+    
+        let mut current_chunk = Chunk::node_world_pos_to_chunk_pos(n.as_ivec3());
+        let neighbor_chunks = Chunk::neighbor_chunks(current_chunk, center_index as u8);
 
-                    // Do work inside mutex
-                    let mut w_v = chunk[n_index].v;
-                    
-                    // Get the edge_mask for free while locking the first time
-                    if i == 0 && j == 0 && k == 0 {
-                        //edge_mask = chunk.edge_mask;
-                        if chunk[n_index].p.max(1) % p.p as u32 == 0 {
-                            let mut dsb = despawn_buf.0.lock().unwrap();
-                            dsb.push(p_index);
-                            chunk[n_index].p /= p.p as u32;
-                        }
-                    }
+        let mut chunk_lock = grid.get(&current_chunk).expect("Particle out of bounds p2g1").lock();
 
-                    std::mem::drop(chunk); // Unlock Mutex
-
-                    w_v *= weight;
-                    let term = Mat3A::from_cols(w_v * curr_dx.x, w_v * curr_dx.y, w_v * curr_dx.z);
-                    b += term;
-                    p.v += w_v;
-                }
-            }
+        if chunk_lock[neighbor_indices[13] as usize].p.max(1) % p.p as u32 == 0 {
+            let mut dsb = despawn_buf.0.lock().unwrap();
+            dsb.push(p_index);
+            chunk_lock[neighbor_indices[13] as usize].p /= p.p as u32;
         }
+
+        let mut velocities: [Vec3A; 27] = [Vec3A::ZERO; 27];
+
+        for ((node_index, &index), &chunk) in neighbor_indices.iter().enumerate().zip(neighbor_chunks.iter()) {
+            if chunk != current_chunk {
+                drop(chunk_lock);
+                chunk_lock = grid.get(&chunk).expect("Particle out of bounds p2g1").lock();
+                current_chunk = chunk;
+            }
+            velocities[node_index] = chunk_lock[index as usize].v;
+        }
+        drop(chunk_lock);
+
+        p.v += velocities.iter().enumerate().fold(Vec3A::ZERO, |velocity, (index, v)| {
+            let k = index / 9;
+            let j = (index % 9) / 3; 
+            let i = index % 3;
+
+            let weight = w[i].x * w[j].y * w[k].z;
+
+            let curr_x = n + (Vec3A::new(i as f32, j as f32, k as f32) - Vec3A::ONE);
+            let curr_dx = (curr_x - p.x) + 0.5;
+
+            let w_v = v * weight;
+            b += Mat3A::from_cols(w_v * curr_dx.x, w_v * curr_dx.y, w_v * curr_dx.z);
+
+            velocity + (v * weight) 
+        });
+
         p.c = b.mul_scalar(4.);
 
         let end = (sim_max_pos - (Chunk::EDGE_BUFFER_SIZE)) as f32;
@@ -406,7 +411,7 @@ pub fn spawn(
     });
     let blue_material = materials.add(StandardMaterial{
         base_color: BLUE_500.into(),
-        unlit: true,
+        unlit: false,
         ..Default::default()
     });
 
