@@ -84,7 +84,6 @@ pub fn clear_grid (grid: ResMut<Grid> ) {
 pub fn p2g1 (
     grid: ResMut<Grid>,
     particles: ResMut<Particles>,
-    //query: Query<&Particle>,
     ) {
     particles.par_iter().for_each(|p| {
         let n = p.x.trunc(); // Truncates decimal part of float, leaving integer part
@@ -96,11 +95,7 @@ pub fn p2g1 (
             0.5 * (0.5 + dx).powf(2.),
         ];
 
-
-        // Buffer to store new node informatio nin to avoid locking mutex 27 times
-        //let mut node_buffer: HashMap<IVec3, Vec<(usize, f32, Vec3A)>> = HashMap::new();
-
-        let results : [(IVec3, /*usize,*/ f32, Vec3A); 27] = core::array::from_fn(|index| {
+        let results : [(f32, Vec3A); 27] = core::array::from_fn(|index| {
             let k = index / 9;
             let j = (index % 9) / 3; 
             let i = index % 3;
@@ -116,19 +111,18 @@ pub fn p2g1 (
             let mass_contribution = weight * p.m;
             let velocity_contribution = mass_contribution * (p.v + Vec3A::from(q));
 
-            let chunk_pos = Chunk::node_world_pos_to_chunk_pos(curr_x.as_ivec3()); 
-            // let node_index = Chunk::node_world_pos_to_index(curr_x.as_ivec3());
-
-            (chunk_pos, /*node_index,*/ mass_contribution, velocity_contribution)
+            (mass_contribution, velocity_contribution)
         });
 
         let center_index = Chunk::node_world_pos_to_index(n.as_ivec3());
         let neighbor_indices = Chunk::neighbor_indices(center_index as u16);
+    
+        let mut current_chunk = Chunk::node_world_pos_to_chunk_pos(n.as_ivec3());
+        let neighbor_chunks = Chunk::neighbor_chunks(current_chunk, center_index as u8);
 
-        let mut current_chunk = results[0].0;
         let mut chunk_lock = grid.get(&current_chunk).expect("Particle out of bounds p2g1").lock();
 
-        for (&(chunk, /*index,*/ mass, velocity), &index) in results.iter().zip(neighbor_indices.iter()) {
+        for ((&(mass, velocity), &index), &chunk) in results.iter().zip(neighbor_indices.iter()).zip(neighbor_chunks.iter()) {
             if chunk != current_chunk {
                 drop(chunk_lock);
                 chunk_lock = grid.get(&chunk).expect("Particle out of bounds p2g1").lock();
@@ -289,7 +283,7 @@ pub fn update_grid (
             }
 
             if chunk_edge_mask != 0 {
-                let node_edge_mask = Chunk::node_local_pos_to_edge_mask(nlp);
+                let node_edge_mask = Chunk::node_local_pos_to_buffer_edge_mask(nlp);
                 if node_edge_mask & chunk_edge_mask != 0 {node.v = Vec3A::ZERO};
             }
         });

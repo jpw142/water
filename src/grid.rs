@@ -86,9 +86,10 @@ impl Chunk {
     ///
     /// Output:
     /// The edge mask of the current edges of the chunk a node is on
+    /// According to the Edge_Buffer
     ///
     /// Test Written and Passed
-    pub fn node_local_pos_to_edge_mask(nlp: UVec3) -> u8 {
+    pub fn node_local_pos_to_buffer_edge_mask(nlp: UVec3) -> u8 {
         let mut edge_mask: u8 = 0;
 
         if (nlp.y as usize) < Chunk::EDGE_BUFFER_SIZE { edge_mask |= 1; } // 1
@@ -101,6 +102,26 @@ impl Chunk {
         edge_mask
     }
 
+    ///
+    /// Input:
+    /// The local position of a Node
+    ///
+    /// Output:
+    /// The edge mask of the current edges of the chunk a node is on
+    /// According to the buffer size of 1
+    ///
+    pub fn node_local_pos_to_one_edge_mask(nlp: UVec3) -> u8{
+        let mut edge_mask: u8 = 0;
+
+        if (nlp.y as usize) < 1 { edge_mask |= 1; } // 1
+        else if (nlp.y as usize) > Chunk::CHUNK_SIZE - (1 + 1) { edge_mask |= 1 << 5; } // 6
+        if (nlp.z as usize) < 1 { edge_mask |= 1 << 1; } // 2
+        else if (nlp.z as usize) > Chunk::CHUNK_SIZE - (1 + 1) { edge_mask |= 1 << 4; } // 5
+        if (nlp.x as usize) < 1 { edge_mask |= 1 << 2; } // 3
+        else if (nlp.x as usize) > Chunk::CHUNK_SIZE - (1 + 1) { edge_mask |= 1 << 3; } // 4
+
+        edge_mask
+    }
     ///
     /// Input:
     /// The index of a node
@@ -166,6 +187,62 @@ impl Chunk {
             (minx_miny + 16) & 63,  (minus_y + 16) & 63,    (plusx_miny + 16) & 63,
             (minus_x + 16) & 63,    (i + 16) & 63,          (plus_x + 16) & 63,
             (minx_plusy + 16) & 63, (plus_y + 16) & 63,     (plusx_plusy + 16) & 63
+        ]
+    }
+
+
+    ///
+    /// Input:
+    /// The center node's edge mask
+    /// The chunk the node is in
+    ///
+    /// Output:
+    /// A list of IVec3 chunk positions of neighboring nodes
+    ///
+    /// Follows the standard of iteration established in this project`
+    ///
+    pub fn neighbor_chunks(chunk_pos: IVec3, node_index: u8) -> [IVec3; 27] {
+        let node_local_positition = Chunk::index_to_node_local_pos(node_index as usize);
+        let e = Chunk::node_local_pos_to_one_edge_mask(node_local_positition);
+        //
+        //  Edge mask formatted like a dice
+        //      +--------+
+        //     /        /|
+        //    /    6   / |
+        //   +--------+  |
+        //   |        | 4|
+        //   |        |  +
+        //   |    5   | /
+        //   |        |/
+        //   +--------+
+        // 1 (0, -1, 0)  
+        // 2 (0, 0, -1)
+        // 3 (-1, 0, 0)
+        // 4 (+1, 0, 0)
+        // 5 (0, 0, +1)
+        // 6 (0, +1, 0)
+        //
+        let neg_y = IVec3::new(0, -(((e) & 1) as i32), 0 );
+        let neg_z = IVec3::new(0, 0, -(((e >> 1) & 1) as i32));
+        let neg_x = IVec3::new(-(((e >> 2) & 1) as i32), 0, 0);
+        let pos_x = IVec3::new(((e >> 3) & 1) as i32, 0, 0);
+        let pos_z = IVec3::new(0, 0, ((e >> 4) & 1) as i32);
+        let pos_y = IVec3::new(0, ((e >> 5) & 1) as i32, 0);
+
+        // TODO: See if pre-fetching mutex from grid here is faster
+        [
+            chunk_pos + neg_x + neg_y + neg_z,  chunk_pos + neg_y + neg_z,      chunk_pos + pos_x + neg_y + neg_z,
+            chunk_pos + neg_x + neg_z,          chunk_pos + neg_z,              chunk_pos + pos_x + neg_z,               
+            chunk_pos + neg_x + pos_y + neg_z,  chunk_pos + pos_y + neg_z,      chunk_pos + pos_x + pos_y + neg_z,
+
+            chunk_pos + neg_x + neg_y,          chunk_pos + neg_y,              chunk_pos + pos_x + neg_y,
+            chunk_pos + neg_x,                  chunk_pos,                      chunk_pos + pos_x,
+            chunk_pos + neg_x + pos_y,          chunk_pos + pos_y,              chunk_pos + pos_x + pos_y,
+
+            chunk_pos + neg_x + neg_y + pos_z,  chunk_pos + neg_y + pos_z,      chunk_pos + pos_x + neg_y + pos_z,
+            chunk_pos + neg_x + pos_z,          chunk_pos + pos_z,              chunk_pos + pos_x + pos_z,
+            chunk_pos + neg_x + pos_y + pos_z,  chunk_pos + pos_y + pos_z,      chunk_pos + pos_x + pos_y + pos_z,
+
         ]
     }
 
@@ -293,15 +370,15 @@ mod tests {
     }
 
     #[test]
-    fn node_local_pos_to_edge_mask_test() {
+    fn node_local_pos_to_buffer_edge_mask_test() {
         let n = Chunk::CHUNK_SIZE as u32;
 
         // (0, 0, 0) should be 111
-        assert!(Chunk::node_local_pos_to_edge_mask(UVec3::ZERO) == 0b111);
+        assert!(Chunk::node_local_pos_to_buffer_edge_mask(UVec3::ZERO) == 0b111);
         // (n -1, n - 1, n - 1) should be 111000
-        assert!(Chunk::node_local_pos_to_edge_mask(UVec3::splat(n - 1)) == 0b111000);
+        assert!(Chunk::node_local_pos_to_buffer_edge_mask(UVec3::splat(n - 1)) == 0b111000);
         // (n - 1, 0, 0) should be 1011
-        assert!(Chunk::node_local_pos_to_edge_mask(UVec3::new(n - 1, 0, 0)) == 0b1011);
+        assert!(Chunk::node_local_pos_to_buffer_edge_mask(UVec3::new(n - 1, 0, 0)) == 0b1011);
     }
 
     #[test]
@@ -354,7 +431,7 @@ mod tests {
     }
 
     #[test]
-    fn neighbor_test() {
+    fn node_neighbor_test() {
         for i in 0..64 {
             let neighbors = Chunk::neighbor_indices(i);
 
@@ -370,7 +447,28 @@ mod tests {
                     }
                 }
             }
+        }
+    }
 
+    #[test]
+    fn chunk_neighbor_test() {
+        for i in 0..64 {
+            let current_node = Chunk::index_to_node_local_pos(i).as_ivec3();
+            let chunk_pos = Chunk::node_world_pos_to_chunk_pos(current_node); 
+
+            let neighbors = Chunk::neighbor_chunks(chunk_pos, i as u8);
+
+            let curr_node = Chunk::index_to_node_local_pos(i as usize).as_ivec3();
+            let mut index = 0;
+            for k in 0..3 {
+                for j in 0..3 {
+                    for i in 0..3 {
+                        let curr_x = curr_node + IVec3::new(i, j, k) - IVec3::ONE;
+                        assert!( Chunk::node_world_pos_to_chunk_pos(curr_x) == neighbors[index as usize] );
+                        index += 1;
+                    }
+                }
+            }
         }
     }
 }
