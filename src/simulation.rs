@@ -148,34 +148,63 @@ pub fn p2g2 (
             0.5 * (0.5 + dx).powf(2.),
         ];
 
+        let center_index = Chunk::node_world_pos_to_index(n.as_ivec3());
+        let neighbor_indices = Chunk::neighbor_indices(center_index as u16);
+    
+        let mut current_chunk = Chunk::node_world_pos_to_chunk_pos(n.as_ivec3());
+        let neighbor_chunks = Chunk::neighbor_chunks(current_chunk, center_index as u8);
 
-        let mut density: f32 = 0.;
-        // Calculate contributions of langrangian particle to euclidean grid
-        for i in 0..3 { 
-            for j in 0..3 {
-                for k in 0..3 {
-                    let weight = w[i].x * w[j].y * w[k].z; // Quadratic B-Spline  
-                    let curr_x = Vec3A::from([
-                                            n.x + (i as f32) - 1.,
-                                            n.y + (j as f32) - 1.,
-                                            n.z + (k as f32) - 1.,
-                    ]);
-                    let icurr_x = curr_x.as_ivec3();
+        let mut chunk_lock = grid.get(&current_chunk).expect("Particle out of bounds p2g1").lock();
 
-                    // Get Mutex
-                    let chunk_index = Chunk::node_world_pos_to_chunk_pos(icurr_x); 
-                    let n_index = Chunk::node_world_pos_to_index(icurr_x);
-                   // TODO: Could be improved by pre-fetching masses
-                    //
-                    let chunk = grid.get(&chunk_index).expect("Particle somehow out of bounds of loaded chunks").lock();
+        let mut masses: [f32; 27] = [0.; 27];
 
-                    // Do work inside mutex
-                    density += chunk[n_index].m * weight;
-
-                    std::mem::drop(chunk); // Unlock Mutex
-                }
+        for ((node_index, &index), &chunk) in neighbor_indices.iter().enumerate().zip(neighbor_chunks.iter()) {
+            if chunk != current_chunk {
+                drop(chunk_lock);
+                chunk_lock = grid.get(&chunk).expect("Particle out of bounds p2g1").lock();
+                current_chunk = chunk;
             }
+            masses[node_index] = chunk_lock[index as usize].m;
         }
+        drop(chunk_lock);
+
+        let density: f32 = masses.iter().enumerate().fold(0.0_f32, |density, (index, m)| {
+            let k = index / 9;
+            let j = (index % 9) / 3; 
+            let i = index % 3;
+
+            let weight = w[i].x * w[j].y * w[k].z;
+
+            density + (m * weight) 
+        });
+
+        //let mut density: f32 = 0.;
+        //// Calculate contributions of langrangian particle to euclidean grid
+        //for i in 0..3 { 
+        //    for j in 0..3 {
+        //        for k in 0..3 {
+        //            let weight = w[i].x * w[j].y * w[k].z; // Quadratic B-Spline  
+        //            let curr_x = Vec3A::from([
+        //                                    n.x + (i as f32) - 1.,
+        //                                    n.y + (j as f32) - 1.,
+        //                                    n.z + (k as f32) - 1.,
+        //            ]);
+        //            let icurr_x = curr_x.as_ivec3();
+
+        //            // Get Mutex
+        //            let chunk_index = Chunk::node_world_pos_to_chunk_pos(icurr_x); 
+        //            let n_index = Chunk::node_world_pos_to_index(icurr_x);
+        //           // TODO: Could be improved by pre-fetching masses
+        //            //
+        //            let chunk = grid.get(&chunk_index).expect("Particle somehow out of bounds of loaded chunks").lock();
+
+        //            // Do work inside mutex
+        //            density += chunk[n_index].m * weight;
+
+        //            std::mem::drop(chunk); // Unlock Mutex
+        //        }
+        //    }
+        //}
 
         let volume = p.m / density;
         let pressure = (-0.1_f32).max(eos_stiffness * (density / rest_density).powf(eos_power) - 1.);
