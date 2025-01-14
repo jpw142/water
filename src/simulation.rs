@@ -178,34 +178,6 @@ pub fn p2g2 (
             density + (m * weight) 
         });
 
-        //let mut density: f32 = 0.;
-        //// Calculate contributions of langrangian particle to euclidean grid
-        //for i in 0..3 { 
-        //    for j in 0..3 {
-        //        for k in 0..3 {
-        //            let weight = w[i].x * w[j].y * w[k].z; // Quadratic B-Spline  
-        //            let curr_x = Vec3A::from([
-        //                                    n.x + (i as f32) - 1.,
-        //                                    n.y + (j as f32) - 1.,
-        //                                    n.z + (k as f32) - 1.,
-        //            ]);
-        //            let icurr_x = curr_x.as_ivec3();
-
-        //            // Get Mutex
-        //            let chunk_index = Chunk::node_world_pos_to_chunk_pos(icurr_x); 
-        //            let n_index = Chunk::node_world_pos_to_index(icurr_x);
-        //           // TODO: Could be improved by pre-fetching masses
-        //            //
-        //            let chunk = grid.get(&chunk_index).expect("Particle somehow out of bounds of loaded chunks").lock();
-
-        //            // Do work inside mutex
-        //            density += chunk[n_index].m * weight;
-
-        //            std::mem::drop(chunk); // Unlock Mutex
-        //        }
-        //    }
-        //}
-
         let volume = p.m / density;
         let pressure = (-0.1_f32).max(eos_stiffness * (density / rest_density).powf(eos_power) - 1.);
         // Identity Matrix
@@ -226,36 +198,38 @@ pub fn p2g2 (
 
         let eq_16_term_0 = -volume * 4. * stress * dt;
 
-        for i in 0..3 { 
-            for j in 0..3 {
-                for k in 0..3 {
-                    let weight = w[i].x * w[j].y * w[k].z; // Quadratic B-Spline  
-                    let curr_x = Vec3A::from([
-                                            n.x + (i as f32) - 1.,
-                                            n.y + (j as f32) - 1.,
-                                            n.z + (k as f32) - 1.,
-                    ]);
-                    let icurr_x = curr_x.as_ivec3();
-                    let curr_dx = (curr_x - p.x) + 0.5; // p distance to current n
-                                                        
-                    let momentum = Vec3A::from(eq_16_term_0 * weight * curr_dx);
+        let results : [Vec3A; 27] = core::array::from_fn(|index| {
+            let k = index / 9;
+            let j = (index % 9) / 3; 
+            let i = index % 3;
 
-                    // Get Mutex
-                    //
-                    let chunk_index = Chunk::node_world_pos_to_chunk_pos(icurr_x); 
-                    let n_index = Chunk::node_world_pos_to_index(icurr_x);
-                    let mut chunk = grid.get(&chunk_index).expect("Particle somehow out of bounds of loaded chunks").lock();
+            let weight = w[i].x * w[j].y * w[k].z;
+
+            let curr_x = n + (Vec3A::new(i as f32, j as f32, k as f32) - Vec3A::ONE);
+            let curr_dx = (curr_x - p.x) + 0.5;
+            
+            Vec3A::from(eq_16_term_0 * weight * curr_dx)
+        });
+
+        let center_index = Chunk::node_world_pos_to_index(n.as_ivec3());
+        let neighbor_indices = Chunk::neighbor_indices(center_index as u16);
+    
+        let mut current_chunk = Chunk::node_world_pos_to_chunk_pos(n.as_ivec3());
+        let neighbor_chunks = Chunk::neighbor_chunks(current_chunk, center_index as u8);
+
+        let mut chunk_lock = grid.get(&current_chunk).expect("Particle out of bounds p2g1").lock();
 
 
-                    // Do work inside mutex
-                    chunk[n_index].v += momentum;
-                    if i == 0 && j == 0 && k == 0 {
-                        chunk[n_index].p *= p.p as u32;
-                    }
+        //if i == 0 && j == 0 && k == 0 { chunk[n_index].p *= p.p as u32; }
+        chunk_lock[neighbor_indices[13] as usize].p *= p.p as u32;
 
-                    std::mem::drop(chunk); // Unlock Mutex
-                }
+        for ((&momentum, &index), &chunk) in results.iter().zip(neighbor_indices.iter()).zip(neighbor_chunks.iter()) {
+            if chunk != current_chunk {
+                drop(chunk_lock);
+                chunk_lock = grid.get(&chunk).expect("Particle out of bounds p2g1").lock();
+                current_chunk = chunk;
             }
+            chunk_lock[index as usize].v += momentum;
         }
     });
 }
