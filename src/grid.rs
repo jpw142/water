@@ -14,9 +14,6 @@ use bevy::prelude::*;
 // because I beleive mutexes are lowly contested enough where mutex lock * 2 is less than cache
 // miss
 //
-// Also might as well try Morton Encoding next to see if that improves the cache efficiency for
-// p2g1 p2g2 && g2p
-
 
 ///
 /// A chunk is an N x N x N block of eulerian nodes that make up a larger fluid simulation space
